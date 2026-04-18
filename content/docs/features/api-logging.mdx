@@ -4,27 +4,32 @@ description: Track third-party HTTP calls alongside data changes.
 ---
 
 API call logging records outbound requests to services like payment
-gateways, shipping APIs, and identity providers. Each log entry captures
-the endpoint, headers, body, response, duration, and status.
+gateways, shipping APIs, and identity providers. Each log entry
+captures the service, endpoint, method, headers, bodies, response,
+duration, and status.
+
+Go Audit **never** originates HTTP calls itself. You call your
+third-party API as usual, then hand the request/response to
+`auditor.API().Record(...)`.
 
 ## Setup
 
-Enable it in the auditor config:
+Enable it on the auditor config:
 
 ```go
-auditor := audit.New(db, audit.Config{
+auditor, err := audit.New(sqlDB, audit.Config{
     Dialect: audit.PostgreSQL,
     APIAudit: audit.APIAuditConfig{
-        Enabled:        true,
-        RedactHeaders:  []string{"Authorization", "X-API-Key"},
+        Enabled:          true,
+        RedactHeaders:    []string{"Authorization", "X-API-Key"},
         RedactBodyFields: []string{"password", "card_number", "cvv"},
-        MaxBodySize:    64 * 1024, // 64 KB
+        MaxBodySize:      64 * 1024, // default is 4096 bytes
     },
 })
 ```
 
-Then run `auditor.AutoMigrate()` — it creates the `audit_api_logs`
-table.
+Then run `auditor.AutoMigrate(ctx)` — it creates the `audit_api_logs`
+table alongside `audit_logs`.
 
 ## Recording an API Call
 
@@ -33,47 +38,79 @@ start := time.Now()
 resp, err := httpClient.Do(req)
 duration := time.Since(start)
 
+headers := map[string]string{}
+for k, v := range req.Header {
+    if len(v) > 0 {
+        headers[k] = v[0]
+    }
+}
+
 _ = auditor.API().Record(ctx, audit.APIEntry{
     Service:        "bca",
     Endpoint:       "/v1/transfer",
     Method:         http.MethodPost,
     StatusCode:     resp.StatusCode,
-    RequestHeaders: toMap(req.Header),
+    RequestHeaders: headers,
     RequestBody:    reqBody,
     ResponseBody:   respBody,
     DurationMs:     int(duration.Milliseconds()),
 })
 ```
 
+`RequestHeaders` is `map[string]string`. `RequestBody` and
+`ResponseBody` are `any` — anything JSON-encodable works.
+
 ## Auto Redaction
 
-Any header in `RedactHeaders` is written as `"[REDACTED]"`. Any body
-field (nested or top-level) in `RedactBodyFields` is likewise masked.
-The redaction applies to request **and** response bodies.
+Any header whose key matches `RedactHeaders` (case-insensitive) is
+replaced with `"***REDACTED***"`. Any body field whose key matches
+`RedactBodyFields` (case-insensitive, at any depth in a JSON tree) is
+replaced the same way.
 
 ```json
 {
-  "request_headers": { "Authorization": "[REDACTED]", "Content-Type": "application/json" },
-  "request_body":   { "card_number": "[REDACTED]", "amount": 100000 }
+  "request_headers": {
+    "Authorization": "***REDACTED***",
+    "Content-Type": "application/json"
+  },
+  "request_body": {
+    "card_number": "***REDACTED***",
+    "amount": 100000
+  }
 }
 ```
 
+The redaction is symmetric — it applies to both request **and**
+response bodies.
+
 ## Body Truncation
 
-Bodies larger than `MaxBodySize` are truncated. The stored record gets
-a `"_truncated": true` marker so you can distinguish truncated payloads
-from genuinely short ones.
+Bodies larger than `MaxBodySize` (default 4096 bytes) are replaced
+with a truncation marker so you can distinguish truncated payloads
+from short ones:
+
+```json
+{
+  "_truncated": true,
+  "original_size": 128512,
+  "preview": "{\"items\":[{\"id\":1,\"name\":\"…"
+}
+```
+
+The preview is the first `MaxBodySize` bytes, rewound to the nearest
+valid UTF-8 rune boundary.
 
 ## Linking to Data Changes
 
-Pass a transaction ID through the context and Go Audit will stamp it on
+Pass a transaction ID through the context and Go Audit stamps it on
 both data audit rows *and* API call rows:
 
 ```go
 txID := audit.NewTransactionID()
 ctx = audit.WithTransactionID(ctx, txID)
 
-// all data + API logs in this context now share txID
+// every data + API log on this ctx shares txID
 ```
 
-Query the full story with [`QueryByTransaction`](/docs/features/transaction-correlation).
+Query the full story with
+[`QueryByTransaction`](/docs/features/transaction-correlation).

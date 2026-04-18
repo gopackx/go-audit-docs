@@ -3,8 +3,8 @@ title: Bun Adapter
 description: Use Go Audit with the Bun ORM.
 ---
 
-The Bun adapter hooks into Bun's query lifecycle to capture inserts,
-updates, and deletes.
+The Bun adapter installs a Bun `QueryHook` so every insert, update,
+and delete is captured automatically.
 
 ## Installation
 
@@ -16,33 +16,60 @@ go get github.com/gopackx/go-audit/adapters/bun
 
 ```go
 import (
+    "context"
+    "database/sql"
+
     "github.com/gopackx/go-audit"
     auditbun "github.com/gopackx/go-audit/adapters/bun"
     "github.com/uptrace/bun"
+    "github.com/uptrace/bun/dialect/pgdialect"
 )
 
-auditor := audit.New(bunDB, audit.Config{
+// sqlDB is the underlying *sql.DB (not *bun.DB)
+bunDB := bun.NewDB(sqlDB, pgdialect.New())
+
+auditor, err := audit.New(sqlDB, audit.Config{
     Dialect: audit.PostgreSQL,
     UserFunc: func(ctx context.Context) (string, string) {
         return "user-123", "user"
     },
+    DataAudit: audit.DataAuditConfig{Enabled: true},
 })
+if err != nil {
+    return err
+}
 
 auditbun.Register(bunDB, auditor)
 
-if err := auditor.AutoMigrate(); err != nil {
+if err := auditor.AutoMigrate(context.Background()); err != nil {
     return err
 }
 ```
 
+> `audit.New` and Bun both use the same `*sql.DB`. The audit hook is
+> attached to `bunDB`.
+
 ## How It Works
 
-The adapter attaches four hooks to the `bun.DB`:
+The adapter installs a single `QueryHook` on the `bun.DB` that:
 
-- `BeforeUpdateHook` — captures the current row state
-- `AfterUpdateHook` — diffs old vs new, writes the audit row
-- `AfterInsertHook` — records the created values
-- `AfterDeleteHook` — records the deleted values
+- Records INSERTs with `new_values`.
+- Before each UPDATE/DELETE, issues a `SELECT` against the same
+  table to snapshot affected rows (skipped if
+  `DataAudit.SkipOldValues` is set).
+- Records UPDATEs with diffed old/new values.
+- Records DELETEs with old values.
+
+### Snapshot Strategy (UPDATE/DELETE)
+
+The adapter tries two strategies in order:
+
+1. **By primary key.** If the caller's model has PK values set
+   (`NewUpdate().Model(&x).WherePK()` or bulk model updates),
+   snapshots are `SELECT ... WHERE pk IN (...)`.
+2. **By rendered WHERE clause.** Otherwise, the adapter parses the
+   rendered SQL and issues an equivalent
+   `SELECT * FROM <table> WHERE <same clause>`.
 
 ## Supported Operations
 
@@ -54,6 +81,13 @@ Batch operations are grouped under one `transaction_id`.
 
 ## Caveats
 
-- Raw SQL executed through `db.ExecContext` bypasses the hooks.
-- Bun's `ForceDelete()` is recorded as a `delete`; soft-delete flows
-  are recorded when the update produces a non-zero `deleted_at`.
+- **Transactions.** The snapshot SELECT runs against the base
+  `*bun.DB`, not the current `*bun.Tx`. Rows written earlier in the
+  same transaction are not visible to the snapshot. For strict
+  transaction-local audits, load old values explicitly before the
+  write, or use the GORM adapter.
+- **Bulk without PKs.** If a bulk UPDATE/DELETE uses a custom
+  predicate without PK hints, the adapter emits one audit entry per
+  snapshotted row logging old values only — post-state is not
+  available after a bulk write.
+- Raw SQL via `db.ExecContext` bypasses the hook and is not audited.

@@ -3,50 +3,69 @@ title: Multi-Database Setup
 description: Run Go Audit against PostgreSQL, MySQL, and SQLite.
 ---
 
-Go Audit works across dialects. The application code is identical — only
-the DSN and `Dialect` change.
+Go Audit works across dialects. The application code is identical —
+only the DSN, GORM driver, and the `Dialect` constant change.
 
 ## PostgreSQL
 
 ```go
-db, _ := gorm.Open(postgres.Open(pgDSN), &gorm.Config{})
-auditor := audit.New(db, audit.Config{Dialect: audit.PostgreSQL})
+gormDB, _ := gorm.Open(postgres.Open(pgDSN), &gorm.Config{})
+sqlDB, _  := gormDB.DB()
+
+auditor, _ := audit.New(sqlDB, audit.Config{
+    Dialect:   audit.PostgreSQL,
+    DataAudit: audit.DataAuditConfig{Enabled: true},
+    UserFunc:  userFromContext,
+})
 ```
 
 ## MySQL
 
 ```go
-db, _ := gorm.Open(mysql.Open(mysqlDSN), &gorm.Config{})
-auditor := audit.New(db, audit.Config{Dialect: audit.MySQL})
+gormDB, _ := gorm.Open(mysql.Open(mysqlDSN), &gorm.Config{})
+sqlDB, _  := gormDB.DB()
+
+auditor, _ := audit.New(sqlDB, audit.Config{
+    Dialect:   audit.MySQL,
+    DataAudit: audit.DataAuditConfig{Enabled: true},
+    UserFunc:  userFromContext,
+})
 ```
 
 ## SQLite
 
 ```go
-db, _ := gorm.Open(sqlite.Open("audit.db"), &gorm.Config{})
-auditor := audit.New(db, audit.Config{Dialect: audit.SQLite})
-```
+gormDB, _ := gorm.Open(sqlite.Open("audit.db"), &gorm.Config{})
+sqlDB, _  := gormDB.DB()
 
-## Auto-Detect
-
-Omit `Dialect` and the adapter reads it from `db.Dialector.Name()`:
-
-```go
-auditor := audit.New(db, audit.Config{
-    // Dialect auto-detected
-    UserFunc: userFromContext,
+auditor, _ := audit.New(sqlDB, audit.Config{
+    Dialect:   audit.SQLite,
+    DataAudit: audit.DataAuditConfig{Enabled: true},
+    UserFunc:  userFromContext,
 })
 ```
 
+## No Auto-Detection
+
+The dialect is always explicit. Pass the matching constant — Go Audit
+does not sniff it from the driver or DSN. This keeps migrations
+deterministic and avoids ambiguity when two drivers target the same
+engine.
+
 ## Switching Dialects
 
-The stored record shape is identical across dialects, so you can
-export from one and import into another. The only caveat: JSON
-stored as `TEXT` in SQLite is still valid JSON — re-parse on
-migration if needed.
+The stored record shape is identical across dialects. Migration
+between databases is straightforward:
+
+1. Stand up the target database and run `auditor.AutoMigrate(ctx)`.
+2. Copy rows. For SQLite → PostgreSQL, remember that SQLite stores
+   JSON as `TEXT`, so the target insert must parse and cast into
+   `JSONB` (most ETL tools handle this automatically).
+3. Verify with a handful of reference queries before switching reads
+   to the new database.
 
 ## Dev vs Prod
 
 A common pattern: SQLite for local dev and tests, PostgreSQL or MySQL
-in production. Go Audit's dialect abstraction means you don't need
-conditional code — just swap the driver.
+in production. Go Audit's dialect abstraction means your application
+code doesn't change — just the DSN and the dialect constant.

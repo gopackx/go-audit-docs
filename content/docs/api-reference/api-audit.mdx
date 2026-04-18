@@ -3,10 +3,14 @@ title: API Audit API
 description: Record and query outbound HTTP calls.
 ---
 
+The API audit surface lives under `auditor.API()`.
+
 ## `Auditor.API().Record(ctx, entry) → error`
 
 Writes an API call record to the `audit_api_logs` table. Applies
-redaction and truncation according to `APIAuditConfig`.
+header and body redaction, JSON marshaling, and body truncation
+according to `APIAuditConfig`. Returns nil (without persisting) when
+`APIAudit.Enabled == false`.
 
 ```go
 _ = auditor.API().Record(ctx, audit.APIEntry{
@@ -14,7 +18,7 @@ _ = auditor.API().Record(ctx, audit.APIEntry{
     Endpoint:   "/v1/transfer",
     Method:     http.MethodPost,
     StatusCode: 200,
-    RequestHeaders: map[string]any{
+    RequestHeaders: map[string]string{
         "Authorization": "Bearer " + token,
         "Content-Type":  "application/json",
     },
@@ -37,48 +41,61 @@ type APIEntry struct {
     Endpoint       string
     Method         string
     StatusCode     int
-    RequestHeaders map[string]any
+    RequestHeaders map[string]string
     RequestBody    any
     ResponseBody   any
     DurationMs     int
     ErrorMessage   string
     Metadata       map[string]any
+    TransactionID  string
 }
 ```
+
+| Field            | Notes                                                           |
+| ---------------- | --------------------------------------------------------------- |
+| `RequestHeaders` | `map[string]string`. One value per header key.                  |
+| `RequestBody`    | `any` — anything JSON-encodable.                                |
+| `ResponseBody`   | `any` — same.                                                   |
+| `TransactionID`  | Overrides context transaction ID when set.                       |
 
 ## `audit.APIFilter`
 
 ```go
 type APIFilter struct {
-    Service    string
-    Endpoint   string
-    Method     string
-    StatusCode int
-    UserID     string
-    DateFrom   time.Time
-    DateTo     time.Time
-    Limit      int
-    Offset     int
+    Service       string
+    StatusCode    int
+    UserID        string
+    TransactionID string
+    DateFrom      time.Time
+    DateTo        time.Time
+    Limit         int
+    Offset        int
 }
 ```
+
+Method and endpoint are intentionally not filter fields — use
+`Service` plus a date range or transaction ID to narrow results.
 
 ## `audit.AuditAPILog`
 
 ```go
 type AuditAPILog struct {
-    ID             uint64         `json:"id"`
-    Service        string         `json:"service"`
-    Endpoint       string         `json:"endpoint"`
-    Method         string         `json:"method"`
-    StatusCode     int            `json:"status_code"`
-    RequestHeaders map[string]any `json:"request_headers"`
-    RequestBody    map[string]any `json:"request_body"`
-    ResponseBody   map[string]any `json:"response_body"`
-    DurationMs     int            `json:"duration_ms"`
-    ErrorMessage   string         `json:"error_message"`
-    UserID         string         `json:"user_id"`
-    Metadata       map[string]any `json:"metadata"`
-    TransactionID  string         `json:"transaction_id"`
-    CreatedAt      time.Time      `json:"created_at"`
+    ID             uint64          `json:"id"`
+    Service        string          `json:"service"`
+    Endpoint       string          `json:"endpoint"`
+    Method         string          `json:"method"`
+    StatusCode     int             `json:"status_code"`
+    RequestHeaders json.RawMessage `json:"request_headers,omitempty"`
+    RequestBody    json.RawMessage `json:"request_body,omitempty"`
+    ResponseBody   json.RawMessage `json:"response_body,omitempty"`
+    DurationMs     int             `json:"duration_ms"`
+    ErrorMessage   string          `json:"error_message,omitempty"`
+    UserID         string          `json:"user_id,omitempty"`
+    Metadata       json.RawMessage `json:"metadata,omitempty"`
+    TransactionID  string          `json:"transaction_id,omitempty"`
+    CreatedAt      time.Time       `json:"created_at"`
 }
 ```
+
+`RequestHeaders`, `RequestBody`, `ResponseBody`, and `Metadata` are
+`json.RawMessage` — decode them at read time.

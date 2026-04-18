@@ -10,7 +10,8 @@ Many Go projects end up with hand-rolled audit code — a helper like
 - Scattered logic, hard to audit itself.
 - Manual diff computation is error-prone.
 
-Go Audit replaces all of that with ORM-level hooks.
+Go Audit replaces all of that with ORM-level hooks and a single
+entry point for code paths that bypass the ORM.
 
 ## Step 1 — Install and Register
 
@@ -20,11 +21,15 @@ go get github.com/gopackx/go-audit/adapters/gorm
 ```
 
 ```go
-auditor := audit.New(db, audit.Config{
-    Dialect:  audit.PostgreSQL,
-    UserFunc: yourExistingUserExtractor,
+sqlDB, _ := gormDB.DB()
+
+auditor, _ := audit.New(sqlDB, audit.Config{
+    Dialect:   audit.PostgreSQL,
+    UserFunc:  yourExistingUserExtractor,
+    DataAudit: audit.DataAuditConfig{Enabled: true},
 })
-_ = db.Use(auditgorm.Plugin(auditor))
+_ = gormDB.Use(auditgorm.Plugin(auditor))
+_ = auditor.AutoMigrate(ctx)
 ```
 
 ## Step 2 — Map Existing Config
@@ -45,6 +50,7 @@ Port it straight into `DataAuditConfig`:
 
 ```go
 DataAudit: audit.DataAuditConfig{
+    Enabled:         true,
     ExcludeFields:   auditConfig.ExcludedFields,
     ExcludeEntities: auditConfig.ExcludedEntities,
 }
@@ -52,21 +58,32 @@ DataAudit: audit.DataAuditConfig{
 
 ## Step 3 — Remove Manual Calls
 
-Delete `recordAudit(...)` calls from your write paths. The ORM plugin
-now captures them automatically.
+Delete your `recordAudit(...)` calls from code paths that go through
+the ORM. The plugin now captures them automatically.
 
-Keep any `recordAudit` calls that run in code paths *not* touched by
-the ORM (raw SQL, external sources) and convert them to
-`auditor.RecordManual(...)`.
+For code paths that **don't** go through the ORM (raw SQL, external
+imports, background workers writing via `database/sql`), switch to
+`auditor.RecordDataChange`:
+
+```go
+_ = auditor.RecordDataChange(ctx, audit.DataEntry{
+    EntityType: "ledger_entries",
+    EntityID:   fmt.Sprint(entry.ID),
+    Action:     audit.ActionCreate,
+    NewValues:  map[string]any{"amount": entry.Amount, "account": entry.Account},
+})
+```
 
 ## Step 4 — Migrate the Table
 
 If your existing audit table shape doesn't match Go Audit's, the
-easiest path is:
+easiest path is side-by-side:
 
-1. Run `auditor.AutoMigrate()` — creates a new `audit_logs` table.
-2. Write a one-off migration that copies old rows into the new shape
-   (or leave them in place as historical data).
+1. Run `auditor.AutoMigrate(ctx)` — creates a fresh `audit_logs`
+   table (defaults to the name `audit_logs`; override via
+   `DataAudit.Table` if you need to coexist).
+2. Write a one-off migration that copies legacy rows into the new
+   shape (or leave them in place as read-only historical data).
 3. Update your read UI to query the new table.
 
 ## Verifying the Cut-Over
@@ -75,11 +92,12 @@ Run both systems side-by-side for a day:
 
 - Keep the old `recordAudit(...)` calls.
 - Enable Go Audit's plugin.
-- Compare rows — they should agree.
+- Spot-check that rows agree on entity, action, and diff shape.
 - Remove the old calls once you're confident.
 
 ## Payoff
 
 - Every code path is audited automatically, including future ones.
-- Diff computation is handled, including nested structs.
+- Diff computation is handled, including the "nothing changed" case.
 - Transaction correlation gives you cross-system traces for free.
+- `Snapshot` / `Restore` / `Purge` come along for free.

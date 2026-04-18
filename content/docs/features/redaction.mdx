@@ -3,14 +3,15 @@ title: Auto Redaction
 description: Sensitive fields and headers are masked before storage.
 ---
 
-Go Audit masks sensitive data before it's ever written to the audit
-table. There are two redaction paths: one for data audit records and
-one for API call logs.
+Go Audit has two redaction paths with different semantics. Data audit
+records **drop** excluded fields entirely; API call records **mask**
+sensitive values with a placeholder so you can see that a secret was
+present and what shape it had.
 
-## Data Audit Redaction
+## Data Audit: Fields Are Dropped
 
-Fields listed in `DataAudit.ExcludeFields` are detected as changed but
-their values are replaced with `"[EXCLUDED]"`:
+Fields listed in `DataAudit.ExcludeFields` are **removed** from both
+`old_values` and `new_values` before the audit row is written:
 
 ```go
 DataAudit: audit.DataAuditConfig{
@@ -18,21 +19,25 @@ DataAudit: audit.DataAuditConfig{
 }
 ```
 
-Stored audit record:
+If a user's password changes, the audit row for that update will
+simply not mention `password` at all. If `password` was the **only**
+field that changed, the entire UPDATE record is suppressed.
 
-```json
-{
-  "old_values": { "password": "[EXCLUDED]" },
-  "new_values": { "password": "[EXCLUDED]" }
+Matching is **case-sensitive** on the map key (which is normally the
+DB column name provided by the ORM adapter).
+
+`DataAudit.ExcludeEntities` is the coarser version — skip whole
+tables:
+
+```go
+DataAudit: audit.DataAuditConfig{
+    ExcludeEntities: []string{"sessions", "cache_entries"},
 }
 ```
 
-The field name is matched against the struct's JSON tag (or field
-name, case-insensitive) and works for nested structs too.
+## API Audit: Values Are Masked
 
-## API Call Redaction
-
-For outbound HTTP calls, two knobs cover the common cases:
+For outbound HTTP calls, two config fields cover headers and bodies:
 
 ```go
 APIAudit: audit.APIAuditConfig{
@@ -41,19 +46,39 @@ APIAudit: audit.APIAuditConfig{
 }
 ```
 
-- `RedactHeaders` masks matching request/response headers.
-- `RedactBodyFields` walks JSON request and response bodies, masking
-  any matching key at any depth.
+- `RedactHeaders` — case-**insensitive** header name match. Value is
+  replaced with `"***REDACTED***"`.
+- `RedactBodyFields` — case-**insensitive** JSON key match at any
+  depth in request and response bodies. Value is replaced with
+  `"***REDACTED***"`.
 
-## Why `"[REDACTED]"` Instead of Omitting?
+```json
+{
+  "request_headers": {
+    "Authorization": "***REDACTED***",
+    "Content-Type": "application/json"
+  },
+  "request_body": {
+    "customer": { "card_number": "***REDACTED***", "name": "Ada" }
+  }
+}
+```
 
-Keeping the key with a masked value preserves the diff signal — you can
-tell that a secret **changed** without knowing *what* it changed to.
-This matters for audit trails: a rotated API key should leave a record
-that rotation happened.
+## Why Different Strategies?
+
+- **Data audits** are diffs. If a password changed but you'd still
+  store `"password": "***REDACTED***"` on both sides of the diff,
+  every single password change would create noisy entries that tell
+  you nothing useful. Dropping the field keeps the trail clean.
+- **API audits** are forensic records of a wire-level interaction.
+  Seeing that a header/field *existed* matters — a masked
+  `Authorization` header tells you the call was authenticated, and
+  `"card_number": "***REDACTED***"` tells you a payment payload was
+  sent. The shape of the call is the record.
 
 ## Compliance
 
 This design covers typical PCI/HIPAA requirements for not persisting
 raw secrets. Verify with your own security review for your specific
-regulatory obligations.
+regulatory obligations, and remember that audit **metadata** and
+**transaction IDs** themselves can be sensitive in some contexts.

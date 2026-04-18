@@ -3,58 +3,117 @@ title: Core
 description: Auditor constructor, Config, and top-level types.
 ---
 
-## `audit.New(db, config) → *Auditor`
+## `audit.New(db, config) → (Auditor, error)`
 
-Creates a new `Auditor` bound to a database connection and config.
+Creates an `Auditor` backed by `database/sql`. The caller supplies an
+open `*sql.DB` — Go Audit never opens its own connection.
 
 ```go
-auditor := audit.New(db, audit.Config{
+auditor, err := audit.New(sqlDB, audit.Config{
     Dialect: audit.PostgreSQL,
     UserFunc: userFromContext,
+    DataAudit: audit.DataAuditConfig{Enabled: true},
 })
 ```
 
-| Param    | Type             | Description                                  |
-| -------- | ---------------- | -------------------------------------------- |
-| `db`     | `*gorm.DB` / compatible | The database handle used for audit writes.  |
-| `config` | `audit.Config`   | Dialect, user function, audit table configs. |
+| Param    | Type           | Description                                 |
+| -------- | -------------- | ------------------------------------------- |
+| `db`     | `*sql.DB`      | Open database handle used for audit writes. |
+| `config` | `audit.Config` | Dialect, user func, audit table configs.    |
 
-Returns a configured `*Auditor`. No DB I/O happens until you call
-`AutoMigrate` or perform the first CRUD through an ORM adapter.
+Returns `(Auditor, error)`. The returned `Auditor` is an **interface**
+value (see below). No DB I/O happens until you call `AutoMigrate` or
+the first CRUD through an ORM adapter.
+
+Validation errors returned by `New`:
+
+- `DataAudit.Enabled && UserFunc == nil` — UserFunc required when
+  data audit is enabled.
+- Neither `DataAudit.Enabled` nor `APIAudit.Enabled` is true.
+- `DataAudit.Table` or `APIAudit.Table` is not a valid SQL identifier.
+
+## `audit.NewWithStore(store, dialect, config) → (Auditor, error)`
+
+Alternative constructor that takes any `Store` implementation. Useful
+for tests (with `audit.NewMemoryStore()`) or for routing audit writes
+through a custom persistence layer.
 
 ## `audit.Config`
 
 ```go
 type Config struct {
-    Dialect   Dialect          // PostgreSQL, MySQL, SQLite (or auto-detect)
-    UserFunc  UserFunc         // extracts (userID, userType) from ctx
+    Dialect   DialectType
+    UserFunc  UserFunc
     DataAudit DataAuditConfig
     APIAudit  APIAuditConfig
+    Logger    func(format string, args ...any)
 }
 ```
+
+| Field       | Purpose                                                                 |
+| ----------- | ----------------------------------------------------------------------- |
+| `Dialect`   | One of `audit.PostgreSQL`, `audit.MySQL`, `audit.SQLite`, or custom.    |
+| `UserFunc`  | Resolves `(userID, userType)` from context on every audit write.        |
+| `DataAudit` | Data change auditing config.                                            |
+| `APIAudit`  | API call auditing config.                                               |
+| `Logger`    | Called when a storage error is swallowed under `ErrorFailSilent`. Optional — defaults to `log.Printf`. |
 
 ## `audit.DataAuditConfig`
 
 ```go
 type DataAuditConfig struct {
-    Enabled         bool     // default: true
-    Table           string   // default: "audit_logs"
-    ExcludeFields   []string // e.g. {"password", "token"}
-    ExcludeEntities []string // e.g. {"sessions"}
+    Table           string
+    Enabled         bool
+    ExcludeFields   []string
+    ExcludeEntities []string
+    SkipOldValues   bool
+    OnError         ErrorMode
 }
 ```
+
+| Field             | Default         | Notes                                           |
+| ----------------- | --------------- | ----------------------------------------------- |
+| `Table`           | `"audit_logs"`  | Must match `^[A-Za-z_][A-Za-z0-9_]{0,62}$`.     |
+| `Enabled`         | `false`         | Must be true (or `APIAudit.Enabled` must be).   |
+| `ExcludeFields`   | `nil`           | Case-sensitive map keys; dropped before storage. |
+| `ExcludeEntities` | `nil`           | Skip entire entity types.                        |
+| `SkipOldValues`   | `false`         | Skip pre-UPDATE/DELETE SELECT in adapters.      |
+| `OnError`         | `ErrorFailLoud` | See `ErrorMode` below.                           |
 
 ## `audit.APIAuditConfig`
 
 ```go
 type APIAuditConfig struct {
-    Enabled          bool     // default: false
-    Table            string   // default: "audit_api_logs"
-    RedactHeaders    []string // masked as "[REDACTED]"
-    RedactBodyFields []string // masked in JSON bodies
-    MaxBodySize      int      // bytes; bodies larger are truncated
+    Table            string
+    Enabled          bool
+    RedactHeaders    []string
+    RedactBodyFields []string
+    MaxBodySize      int
+    OnError          ErrorMode
 }
 ```
+
+| Field              | Default              | Notes                                            |
+| ------------------ | -------------------- | ------------------------------------------------ |
+| `Table`            | `"audit_api_logs"`   | Must match `^[A-Za-z_][A-Za-z0-9_]{0,62}$`.      |
+| `Enabled`          | `false`              | Enables `auditor.API()`.                         |
+| `RedactHeaders`    | `nil`                | Case-insensitive header key match.               |
+| `RedactBodyFields` | `nil`                | Case-insensitive JSON key match at any depth.    |
+| `MaxBodySize`      | `4096` (bytes)       | Oversized bodies get truncation marker.          |
+| `OnError`          | `ErrorFailLoud`      | See `ErrorMode` below.                           |
+
+## `audit.ErrorMode`
+
+```go
+const (
+    ErrorFailLoud   ErrorMode = iota // surfaces store errors to the caller (default)
+    ErrorFailSilent                  // logs via Config.Logger and returns nil
+)
+```
+
+Use `ErrorFailSilent` when the application write must not be coupled
+to audit availability (e.g. the audit DB is allowed to be briefly
+unavailable during maintenance).
 
 ## `audit.UserFunc`
 
@@ -62,8 +121,8 @@ type APIAuditConfig struct {
 type UserFunc func(ctx context.Context) (userID string, userType string)
 ```
 
-Called on every audit write. Typical implementation pulls a user out of
-the request context set by middleware.
+Called on every audit write. Typical implementation pulls a user out
+of the request context set by middleware.
 
 ```go
 func userFromContext(ctx context.Context) (string, string) {
@@ -74,23 +133,64 @@ func userFromContext(ctx context.Context) (string, string) {
 }
 ```
 
+Required when `DataAudit.Enabled == true`.
+
 ## Constants
 
 ```go
 const (
-    ActionCreate = "create"
-    ActionUpdate = "update"
-    ActionDelete = "delete"
+    ActionCreate     = "create"
+    ActionUpdate     = "update"
+    ActionDelete     = "delete"
+    ActionSoftDelete = "soft_delete"
+    ActionRestore    = "restore"
 )
 
 const (
-    PostgreSQL Dialect = "postgres"
-    MySQL      Dialect = "mysql"
-    SQLite     Dialect = "sqlite"
+    PostgreSQL DialectType = "postgres"
+    MySQL      DialectType = "mysql"
+    SQLite     DialectType = "sqlite"
 )
 ```
 
-## `Auditor.AutoMigrate() → error`
+## `Auditor` Interface
 
-Creates the `audit_logs` table, and (if `APIAudit.Enabled`) the
-`audit_api_logs` table. Safe to call repeatedly.
+```go
+type Auditor interface {
+    RecordDataChange(ctx context.Context, entry DataEntry) error
+    API() APIAuditor
+    Query(ctx context.Context, filter DataFilter) ([]AuditLog, error)
+    QueryByTransaction(ctx context.Context, txID string) (*TransactionLog, error)
+    AutoMigrate(ctx context.Context) error
+    Purge(ctx context.Context, before time.Time) (PurgeResult, error)
+    Snapshot(ctx context.Context, entityType, entityID string, at time.Time) (map[string]any, error)
+    Restore(ctx context.Context, entityType, entityID string, at time.Time) (*RestoreResult, error)
+    Config() Config
+}
+```
+
+- **`RecordDataChange`** — manual entry point used by ORM adapters and
+  callers writing via raw SQL. Applies diff, exclusion, and context
+  transaction ID resolution.
+- **`API()`** — returns the `APIAuditor` for third-party call logging.
+- **`Query`** / **`QueryByTransaction`** — read paths (see
+  [Query & Filters](/docs/api-reference/query)).
+- **`AutoMigrate(ctx)`** — creates audit tables and indexes. Safe to
+  call repeatedly; uses `IF NOT EXISTS` everywhere.
+- **`Purge(ctx, before)`** — deletes rows older than `before` from both
+  tables (if enabled). Returns per-table counts.
+- **`Snapshot`** / **`Restore`** — reconstruct entity state at a past
+  time by replaying audit history (see
+  [Query & Filters](/docs/api-reference/query)).
+- **`Config()`** — returns the configuration the Auditor was created
+  with.
+
+## Store Helpers
+
+```go
+audit.NewSQLStore(db *sql.DB, d Dialect) Store
+audit.NewMemoryStore() Store
+```
+
+`NewSQLStore` backs the default path. `NewMemoryStore` is intended
+for tests.

@@ -1,20 +1,22 @@
 ---
 title: Query & Filters
-description: Cross-table queries and shared pagination semantics.
+description: Cross-table queries, retention, snapshot, and restore.
 ---
 
 ## `Auditor.QueryByTransaction(ctx, txID) → (*TransactionLog, error)`
 
-Fetches all data audit rows and API call rows sharing a
+Fetches all data audit rows **and** API call rows sharing a
 `transaction_id`.
 
 ```go
-tx, err := auditor.QueryByTransaction(ctx, "txn-1a2b3c4d")
-// tx.DataLogs  []AuditLog
-// tx.APILogs   []AuditAPILog
+trail, err := auditor.QueryByTransaction(ctx, txID)
+// trail.DataLogs  []AuditLog
+// trail.APILogs   []AuditAPILog
 ```
 
-## `audit.TransactionLog`
+API logs are only included if `APIAudit.Enabled == true`.
+
+### `audit.TransactionLog`
 
 ```go
 type TransactionLog struct {
@@ -24,8 +26,8 @@ type TransactionLog struct {
 }
 ```
 
-Use this in UIs that show a "transaction timeline" or in support tools
-that need to reconstruct what happened during a single user action.
+Use this in UIs that show a transaction timeline or in support
+tooling that reconstructs what happened during a single user action.
 
 ## Pagination
 
@@ -37,18 +39,91 @@ page2, _ := auditor.Query(ctx, audit.DataFilter{Limit: 25, Offset: 25})
 ```
 
 For very large tables, prefer keyset pagination against `created_at`
-(filter by `DateTo` using the last row's timestamp) over offset
-pagination.
+(set the next page's `DateTo` to the previous page's last row's
+`CreatedAt`) over deep offset pagination.
 
 ## Sorting
 
 All queries return results ordered by `created_at DESC` by default.
-Stable ordering is guaranteed by the secondary `id` column.
 
-## Helpers
+## Transaction ID Helpers
 
 ```go
-audit.NewTransactionID() string           // generates a unique ID
-audit.WithTransactionID(ctx, id) context  // stamps the ID into ctx
-audit.TransactionIDFrom(ctx) (string, bool)
+func audit.NewTransactionID() string
+func audit.WithTransactionID(ctx context.Context, txID string) context.Context
+func audit.TransactionIDFromContext(ctx context.Context) string
 ```
+
+`NewTransactionID` returns a `YYYYMMDDTHHmmss-<32-char hex>` string
+(lexicographically sortable by time). `TransactionIDFromContext`
+returns the empty string when no ID is set.
+
+## `Auditor.Purge(ctx, before) → (PurgeResult, error)`
+
+Deletes rows older than `before` from `audit_logs` and
+`audit_api_logs` (only the tables that are enabled).
+
+```go
+cutoff := time.Now().AddDate(-1, 0, 0) // 1 year ago
+result, err := auditor.Purge(ctx, cutoff)
+// result.DataLogs: int64 rows deleted
+// result.APILogs:  int64 rows deleted
+```
+
+Returns a `PurgeResult`:
+
+```go
+type PurgeResult struct {
+    DataLogs int64
+    APILogs  int64
+}
+```
+
+Run `Purge` from a daily cron to enforce retention policies.
+
+## `Auditor.Snapshot(ctx, entityType, entityID, at) → (map[string]any, error)`
+
+Reconstructs the state of an entity at a given point in time by
+replaying its audit history up to `at`.
+
+```go
+state, err := auditor.Snapshot(ctx,
+    "orders", "42",
+    time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC),
+)
+// state is the map of column → value at that moment
+```
+
+Returns `nil` (without error) if the entity did not exist or had been
+deleted at that time. Requires non-empty `entityType`, `entityID`,
+and a non-zero `at` time.
+
+Useful for "what did this record look like when X happened?" questions
+during incident response.
+
+## `Auditor.Restore(ctx, entityType, entityID, at) → (*RestoreResult, error)`
+
+Reconstructs the target state via `Snapshot`, then writes a `restore`
+audit entry (old values = current state, new values = target state),
+and returns the target values for the caller to apply via their ORM.
+
+```go
+result, err := auditor.Restore(ctx, "orders", "42", oldTime)
+if err != nil { return err }
+
+// Apply the returned values via GORM
+gormDB.Model(&Order{ID: 42}).Updates(result.Values)
+```
+
+```go
+type RestoreResult struct {
+    EntityType string         `json:"entity_type"`
+    EntityID   string         `json:"entity_id"`
+    Values     map[string]any `json:"values,omitempty"`
+    WasDeleted bool           `json:"was_deleted"`
+}
+```
+
+The ORM adapter will not record the application-level write as a
+separate update — the `restore` audit entry already captures it. Your
+caller is responsible for actually persisting the restored values.

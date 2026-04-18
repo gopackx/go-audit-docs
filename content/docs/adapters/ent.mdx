@@ -1,10 +1,10 @@
 ---
 title: Ent Adapter
-description: Use Go Audit with the Ent ORM via mutation interceptors.
+description: Use Go Audit with the Ent ORM via a mutation hook.
 ---
 
-The Ent adapter attaches mutation interceptors so every create,
-update, and delete operation is tracked.
+The Ent adapter attaches a mutation hook so every create, update,
+and delete is captured.
 
 ## Installation
 
@@ -16,40 +16,66 @@ go get github.com/gopackx/go-audit/adapters/ent
 
 ```go
 import (
+    "context"
+    "database/sql"
+
     "github.com/gopackx/go-audit"
     auditent "github.com/gopackx/go-audit/adapters/ent"
+    "entgo.io/ent/dialect"
+    entsql "entgo.io/ent/dialect/sql"
+
+    "your.app/ent" // generated
 )
 
-auditor := audit.New(client.DB(), audit.Config{
+driver := entsql.OpenDB(dialect.Postgres, sqlDB)
+client := ent.NewClient(ent.Driver(driver))
+
+auditor, err := audit.New(sqlDB, audit.Config{
     Dialect: audit.PostgreSQL,
     UserFunc: func(ctx context.Context) (string, string) {
         return "user-123", "user"
     },
+    DataAudit: audit.DataAuditConfig{Enabled: true},
 })
+if err != nil {
+    return err
+}
 
 client.Use(auditent.Hook(auditor))
+
+if err := auditor.AutoMigrate(context.Background()); err != nil {
+    return err
+}
 ```
 
 ## How It Works
 
-The adapter wraps Ent's mutation pipeline:
+`auditent.Hook(auditor)` returns an `ent.Hook` that wraps every
+mutation:
 
-1. Intercept the mutation before execution to capture the current state.
-2. Let the mutation run.
-3. Diff old vs new and write the audit row.
-
-Because Ent already exposes the mutation's `Fields()` and `Op()`, the
-adapter can generate structured audit records without extra queries in
-the common case.
+1. For single-row UPDATEs and DELETEs, reads the pre-mutation field
+   values via `mutation.OldField(...)`.
+2. Lets the mutation run.
+3. Records the audit entry with the appropriate action, using the
+   mutation's `ID()` or `IDs(ctx)` to identify affected rows.
 
 ## Supported Operations
 
-- `Create`, `Update`, `UpdateOne`, `Delete`, `DeleteOne`
-- Bulk operations — each entity gets its own audit row under a shared
-  `transaction_id`
+- `Create`, `CreateBulk`
+- `Update`, `UpdateOne`
+- `Delete`, `DeleteOne`
+
+For bulk `Update` / `Delete` operations, Ent exposes the affected IDs
+via `mutation.IDs(ctx)` but **not** the pre-mutation field values.
+The adapter emits one audit row per affected ID without `old_values`.
 
 ## Caveats
 
-- Raw SQL via `client.ExecContext()` is not tracked.
-- Hooks skipped via `client.Use(ent.Hook(...))` ordering need care:
-  register the audit hook **last** so it sees the final mutation state.
+- **Bulk old values are unavailable.** This is an Ent design
+  limitation — the framework does not surface pre-mutation state for
+  many-row operations.
+- **Hook order matters.** Register the audit hook last so it sees
+  the final mutation state after any application-level hooks have
+  run.
+- Raw SQL via `client.ExecContext()` / `driver.ExecContext()` is not
+  tracked.

@@ -16,6 +16,7 @@ import (
     "context"
     "encoding/json"
     "io"
+    "log"
     "net/http"
     "time"
 
@@ -33,13 +34,21 @@ type Order struct {
 }
 
 func main() {
-    db, _ := gorm.Open(postgres.Open("..."), &gorm.Config{})
+    gormDB, err := gorm.Open(postgres.Open("..."), &gorm.Config{})
+    if err != nil {
+        log.Fatal(err)
+    }
+    sqlDB, err := gormDB.DB()
+    if err != nil {
+        log.Fatal(err)
+    }
 
-    auditor := audit.New(db, audit.Config{
+    auditor, err := audit.New(sqlDB, audit.Config{
         Dialect: audit.PostgreSQL,
         UserFunc: func(ctx context.Context) (string, string) {
             return "user-42", "user"
         },
+        DataAudit: audit.DataAuditConfig{Enabled: true},
         APIAudit: audit.APIAuditConfig{
             Enabled:          true,
             RedactHeaders:    []string{"Authorization"},
@@ -47,17 +56,20 @@ func main() {
             MaxBodySize:      64 * 1024,
         },
     })
+    if err != nil {
+        log.Fatal(err)
+    }
 
-    _ = db.Use(auditgorm.Plugin(auditor))
-    _ = auditor.AutoMigrate()
-    _ = db.AutoMigrate(&Order{})
+    _ = gormDB.Use(auditgorm.Plugin(auditor))
+    _ = auditor.AutoMigrate(context.Background())
+    _ = gormDB.AutoMigrate(&Order{})
 
     order := Order{Amount: 100000, Status: "pending"}
-    db.Create(&order)
+    gormDB.Create(&order)
 
     txID := audit.NewTransactionID()
     ctx := audit.WithTransactionID(context.Background(), txID)
-    tx := db.WithContext(ctx)
+    tx := gormDB.WithContext(ctx)
 
     // Outbound API call to BCA
     reqBody, _ := json.Marshal(map[string]any{"amount": order.Amount})
@@ -68,6 +80,13 @@ func main() {
     )
     req.Header.Set("Authorization", "Bearer secret")
     req.Header.Set("Content-Type", "application/json")
+
+    headers := map[string]string{}
+    for k, v := range req.Header {
+        if len(v) > 0 {
+            headers[k] = v[0]
+        }
+    }
 
     start := time.Now()
     resp, err := http.DefaultClient.Do(req)
@@ -84,7 +103,7 @@ func main() {
         Endpoint:       "/v1/transfer",
         Method:         http.MethodPost,
         StatusCode:     statusCode(resp),
-        RequestHeaders: headersToMap(req.Header),
+        RequestHeaders: headers,
         RequestBody:    map[string]any{"amount": order.Amount},
         ResponseBody:   respPayload,
         DurationMs:     int(duration.Milliseconds()),
@@ -100,16 +119,20 @@ func main() {
 
     // Fetch the full transaction trail
     trail, _ := auditor.QueryByTransaction(ctx, txID)
-    _ = trail // has both DataLogs and APILogs
+    _ = trail // contains both DataLogs and APILogs
 }
 ```
+
+`statusCode` and `errString` are trivial helpers — return 0 / "" when
+the input is nil.
 
 ## What You Get
 
 - `audit_logs` has one row for the order update with the new
   `payment_ref` and `status`.
-- `audit_api_logs` has one row for the BCA call with the redacted
-  `Authorization` header and full response body.
+- `audit_api_logs` has one row for the BCA call with the
+  `Authorization` header replaced by `"***REDACTED***"` and the full
+  response body (or a truncation marker if it exceeded `MaxBodySize`).
 - Both rows share the same `transaction_id`.
 
 ## Next

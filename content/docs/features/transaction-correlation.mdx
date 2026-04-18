@@ -11,12 +11,19 @@ full story later.
 ## Generating a Transaction ID
 
 ```go
-txID := audit.NewTransactionID() // "txn-1a2b3c4d"
+txID := audit.NewTransactionID()
+// "20260418T142318-9f3c2a71c8e4d2b15c90a63e4f712b88"
+
 ctx = audit.WithTransactionID(ctx, txID)
 ```
 
+`NewTransactionID` returns a `YYYYMMDDTHHmmss-<32-char hex>` string —
+the timestamp prefix makes IDs sortable while the random suffix keeps
+them globally unique.
+
 Every audit write on that context — data or API — receives the same
-`transaction_id`.
+`transaction_id` value unless `DataEntry.TransactionID` or
+`APIEntry.TransactionID` is set explicitly on the entry itself.
 
 ## Full Flow Example
 
@@ -31,7 +38,7 @@ func Transfer(ctx context.Context, orderID string, amount int) error {
     }
 
     // 2. Update the order — logged to audit_logs
-    return db.WithContext(ctx).
+    return gormDB.WithContext(ctx).
         Model(&Order{}).
         Where("id = ?", orderID).
         Updates(map[string]any{
@@ -44,12 +51,21 @@ func Transfer(ctx context.Context, orderID string, amount int) error {
 Both the BCA API call row and the order update row carry the same
 `transaction_id`.
 
+## Reading the Transaction ID
+
+```go
+txID := audit.TransactionIDFromContext(ctx) // "" if unset
+```
+
+Useful inside middleware that wants to log the current transaction ID
+alongside application logs.
+
 ## Querying by Transaction
 
 ```go
-logs, err := auditor.QueryByTransaction(ctx, txID)
-// logs.DataLogs  []AuditLog
-// logs.APILogs   []AuditAPILog
+trail, err := auditor.QueryByTransaction(ctx, txID)
+// trail.DataLogs  []AuditLog
+// trail.APILogs   []AuditAPILog
 ```
 
 ## Output Shape
@@ -65,3 +81,11 @@ type TransactionLog struct {
 This gives you a single object that reconstructs the full sequence of
 side effects for the transaction — perfect for support tickets,
 post-mortems, and compliance reviews.
+
+## Batch Writes
+
+ORM adapters automatically group batch writes under a single
+`transaction_id` per SQL statement, even if the caller didn't stamp a
+transaction ID onto the context. That means every row updated by a
+bulk `UPDATE ... WHERE ...` ends up in the same transaction group,
+and `QueryByTransaction` returns them together.

@@ -28,36 +28,49 @@ type Product struct {
     Price int
 }
 
+type ctxKey string
+
+const userIDKey ctxKey = "user_id"
+
 func main() {
     dsn := "host=localhost user=postgres password=postgres dbname=shop port=5432 sslmode=disable"
-    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    gormDB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    if err != nil {
+        log.Fatal(err)
+    }
+    sqlDB, err := gormDB.DB()
     if err != nil {
         log.Fatal(err)
     }
 
-    auditor := audit.New(db, audit.Config{
+    auditor, err := audit.New(sqlDB, audit.Config{
         Dialect: audit.PostgreSQL,
         UserFunc: func(ctx context.Context) (string, string) {
-            if u, ok := ctx.Value("user_id").(string); ok {
+            if u, ok := ctx.Value(userIDKey).(string); ok {
                 return u, "user"
             }
             return "system", "system"
         },
+        DataAudit: audit.DataAuditConfig{Enabled: true},
     })
-
-    if err := db.Use(auditgorm.Plugin(auditor)); err != nil {
+    if err != nil {
         log.Fatal(err)
     }
 
-    if err := auditor.AutoMigrate(); err != nil {
-        log.Fatal(err)
-    }
-    if err := db.AutoMigrate(&Product{}); err != nil {
+    if err := gormDB.Use(auditgorm.Plugin(auditor)); err != nil {
         log.Fatal(err)
     }
 
-    ctx := context.WithValue(context.Background(), "user_id", "user-42")
-    tx := db.WithContext(ctx)
+    ctx := context.Background()
+    if err := auditor.AutoMigrate(ctx); err != nil {
+        log.Fatal(err)
+    }
+    if err := gormDB.AutoMigrate(&Product{}); err != nil {
+        log.Fatal(err)
+    }
+
+    ctx = context.WithValue(ctx, userIDKey, "user-42")
+    tx := gormDB.WithContext(ctx)
 
     p := Product{Name: "Keyboard", Price: 150}
     tx.Create(&p)
@@ -81,7 +94,8 @@ func main() {
 
 Inspect the `audit_logs` table directly and you'll see each row's
 `old_values` and `new_values` populated correctly — the `update` row
-only contains the `Price` field because that's all that changed.
+only contains the `price` field because that's the only one that
+changed.
 
 ## Next
 

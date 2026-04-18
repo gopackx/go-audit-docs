@@ -9,31 +9,51 @@ The default tables are `audit_logs` (data changes) and `audit_api_logs`
 ## Configuration
 
 ```go
-auditor := audit.New(db, audit.Config{
+auditor, _ := audit.New(sqlDB, audit.Config{
+    Dialect: audit.PostgreSQL,
     DataAudit: audit.DataAuditConfig{
-        Table: "app_audit_events",
+        Enabled: true,
+        Table:   "app_audit_events",
     },
     APIAudit: audit.APIAuditConfig{
-        Table: "app_outbound_calls",
+        Enabled: true,
+        Table:   "app_outbound_calls",
     },
 })
 ```
 
-`AutoMigrate()` will create the tables under your chosen names, and all
-queries (`Query`, `API().Query`, `QueryByTransaction`) automatically use
-the configured names.
+`AutoMigrate(ctx)` creates the tables under your chosen names, and
+all queries (`Query`, `API().Query`, `QueryByTransaction`, `Purge`)
+automatically use the configured names.
+
+## Validation
+
+Table names are validated against `^[A-Za-z_][A-Za-z0-9_]{0,62}$` —
+standard SQL identifier rules. `audit.New` returns an error if either
+table name is invalid:
+
+```go
+_, err := audit.New(sqlDB, audit.Config{
+    DataAudit: audit.DataAuditConfig{Table: "bad table name"},
+})
+// err != nil — spaces are not allowed
+```
 
 ## Use Cases
 
 - **Multi-tenant schemas.** Prefix tables with a tenant identifier:
   `tenant42_audit_logs`.
-- **Naming conventions.** Match an existing project style (e.g.
-  singular vs plural).
-- **Parallel installs.** Run two `Auditor` instances side-by-side with
-  different tables for different subsystems.
+- **Naming conventions.** Match an existing project style (singular
+  vs plural, snake_case vs PascalCase).
+- **Parallel installs.** Run two `Auditor` instances side-by-side
+  with different tables for different subsystems (e.g. one per
+  bounded context).
 
-## Constraints
+## Migrating Existing Tables
 
-- Table names must be valid identifiers for your target dialect.
-- Changing the name after records exist requires a migration — Go Audit
-  does not rename automatically.
+Go Audit does **not** rename tables automatically. If you change
+`DataAudit.Table` after records exist:
+
+1. Create the new table via `auditor.AutoMigrate(ctx)`.
+2. Copy rows from the old table (`INSERT INTO new SELECT ... FROM old`).
+3. Update reads and drop the old table once you're confident.

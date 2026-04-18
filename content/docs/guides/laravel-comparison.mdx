@@ -8,21 +8,25 @@ the mental model carries over directly. Here's the mapping.
 
 ## Comparison Table
 
-| Laravel (`laravel-auditing`)     | Go Audit                              |
-| -------------------------------- | ------------------------------------- |
-| `use Auditable` trait on model   | `db.Use(auditgorm.Plugin(auditor))`   |
-| `$model->audits()` relation      | `auditor.Query(ctx, filter)`          |
-| `config/audit.php`               | `audit.Config{}` passed at init        |
-| `Audit::$exclude`                | `DataAudit.ExcludeFields`             |
-| `getAuditExclude()`              | `DataAudit.ExcludeEntities`           |
-| `Audit::getAuditUser()`          | `Config.UserFunc(ctx)`                |
-| `Audit::$auditable = ['create']` | Applied on all actions; filter on read |
+| Laravel (`laravel-auditing`)     | Go Audit                                      |
+| -------------------------------- | --------------------------------------------- |
+| `use Auditable` trait on model   | `db.Use(auditgorm.Plugin(auditor))`           |
+| `$model->audits()` relation      | `auditor.Query(ctx, DataFilter{...})`         |
+| `config/audit.php`               | `audit.Config{}` passed to `audit.New`        |
+| `Audit::$exclude`                | `DataAudit.ExcludeFields`                     |
+| Table-level disabling            | `DataAudit.ExcludeEntities`                   |
+| `Audit::resolveUser()`           | `Config.UserFunc(ctx)`                         |
+| `Audit::$auditable = ['created']`| All actions recorded; filter on read via `DataFilter.Action` |
+| —                                | `Snapshot(ctx, type, id, at)`                 |
+| —                                | `Restore(ctx, type, id, at)`                  |
+| —                                | API call logging (`Auditor.API().Record`)     |
+| —                                | `transaction_id` correlation across tables    |
 
 ## Key Differences
 
-### Model-centric vs Plugin-centric
+### Model-centric vs Connection-centric
 
-Laravel auditing works at the **model** level — each Eloquent model
+Laravel-auditing works at the **model** level — each Eloquent model
 opts in via a trait. Go Audit works at the **connection** level —
 register the plugin once and every model is covered.
 
@@ -32,24 +36,33 @@ no trait to remember.
 ### Diff Scope
 
 `laravel-auditing` stores `old_values` and `new_values` as full field
-maps. Go Audit only stores the **changed** fields, which keeps the
-table small on wide updates.
+maps. Go Audit only stores the **changed** fields on UPDATE, which
+keeps the table small on wide updates.
 
 ### API Call Logging
 
 Laravel has no built-in equivalent — API call logging typically lives
-in a separate package. Go Audit bundles it with matching schema and
-transaction correlation.
+in a separate package. Go Audit bundles it with a matching schema and
+transaction correlation that links API calls to the data changes
+they drove.
 
 ### Transaction Correlation
 
 `laravel-auditing` doesn't ship with cross-table transaction linking.
-Go Audit's `transaction_id` binds data changes *and* API calls under
-one ID so you can reconstruct an entire business transaction.
+Go Audit's `transaction_id` groups data changes **and** API calls
+under one ID so you can reconstruct an entire business transaction
+with `QueryByTransaction`.
+
+### Snapshot & Restore
+
+Laravel-auditing doesn't reconstruct past state. Go Audit's
+`Snapshot(ctx, type, id, at)` replays audit history to return what an
+entity looked like at a given time, and `Restore` writes a `restore`
+audit entry plus returns the target values for you to apply.
 
 ### User Attribution
 
-Laravel pulls the user from the auth guard by default. Go Audit uses a
-`UserFunc(ctx)` callback so you can integrate with whatever pattern
+Laravel pulls the user from the auth guard by default. Go Audit uses
+a `UserFunc(ctx)` callback so you can integrate with whatever pattern
 your app uses for request context (middleware, JWT claims, tenant
 context, etc.).

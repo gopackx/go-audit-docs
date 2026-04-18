@@ -14,38 +14,70 @@ cd go-audit
 go mod download
 ```
 
+Go 1.22 or later is required (matches the `go.mod` directive).
+
 ## Running Tests
 
 The core tests run against SQLite in-memory (no setup required).
-Dialect tests use Docker for PostgreSQL and MySQL:
+Integration tests against PostgreSQL and MySQL use Docker:
 
 ```bash
 docker compose up -d          # starts pg + mysql
 go test ./...
 ```
 
-Run only the SQLite tests:
+Run only the core (SQLite-backed) tests:
 
 ```bash
-go test -tags=sqlite ./...
+go test ./...                 # uses in-memory store by default
+go test ./integration/...     # requires Docker
+```
+
+## Project Layout
+
+```
+.
+├── audit.go, auditor.go, api_auditor.go   core types and implementations
+├── config.go, types.go                    Config, structs, validation
+├── diff.go, redact.go                     diff engine, redaction helpers
+├── transaction.go, aliases.go             context helpers, re-exports
+├── dialect/                               PG / MySQL / SQLite dialects
+├── store/                                 Store interface, SQL + in-memory
+├── migrate/                               schema creation
+├── entry/                                 persistent types (AuditLog, …)
+├── adapters/
+│   ├── gorm/                              GORM plugin
+│   ├── bun/                               Bun QueryHook
+│   └── ent/                               Ent mutation hook
+└── _examples/                             runnable end-to-end samples
 ```
 
 ## Adding a New Adapter
 
 1. Create a new package under `adapters/<orm>`.
-2. Implement the adapter's `Register(db, auditor)` entry point.
-3. Hook into the ORM's lifecycle (callbacks, hooks, interceptors).
-4. Reuse the core `Auditor` for all writes — don't duplicate diff
-   logic.
-5. Add a full test suite that mirrors the GORM adapter's test layout.
+2. Expose a registration entry point. Existing patterns:
+   - GORM — `Plugin(auditor) gorm.Plugin`
+   - Bun — `Register(db, auditor)`
+   - Ent — `Hook(auditor) ent.Hook`
+3. Hook into the ORM's lifecycle to capture create, update, and
+   delete events.
+4. Reuse the core `Auditor` via `RecordDataChange` — don't duplicate
+   diff or exclusion logic.
+5. Add a full test suite that mirrors `adapters/gorm`'s layout.
 
 See `adapters/gorm` for the reference implementation.
+
+## Adding a New Dialect
+
+1. Implement `dialect.Dialect` for your target database.
+2. Register via `audit.RegisterDialect(DialectType("name"), impl)`.
+3. Add dialect tests parallel to the built-ins under `dialect/`.
 
 ## Code Style
 
 - `gofmt` + `goimports`.
 - `golangci-lint run` passes with the repo's config.
-- Conventional commit messages: `feat: ...`, `fix: ...`, `docs: ...`,
+- Conventional commits: `feat: ...`, `fix: ...`, `docs: ...`,
   `chore: ...`.
 
 ## Pull Request Process

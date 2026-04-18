@@ -3,12 +3,23 @@ title: Changelog
 description: Release notes for Go Audit.
 ---
 
-## v0.1.0 (unreleased)
+## v1.0.0
 
-- Initial release
-- Core: auto-diff, transaction correlation, multi-dialect
-- GORM adapter with full auto-hooks (create / update / delete)
-- API call logging with header and body redaction
-- PostgreSQL, MySQL, SQLite support
-- Query builder with filters (entity, user, action, date range)
-- `AutoMigrate` for `audit_logs` and `audit_api_logs` tables
+- Initial stable release
+- Core auditor backed by `database/sql`; zero network dependencies
+- Auto-diff on UPDATE — only changed fields stored
+- Manual entry point (`RecordDataChange`) for raw-SQL code paths
+- API call logging with header and JSON body redaction
+- Body truncation marker for oversized payloads
+- Transaction correlation via `transaction_id` and context helpers
+- Snapshot and Restore — reconstruct entity state at a past time
+- Retention via `Purge(ctx, before)`
+- Configurable error modes (`ErrorFailLoud` / `ErrorFailSilent`)
+- Custom table names for both audit tables
+- Field and entity exclusion
+- Dialects: PostgreSQL, MySQL, SQLite (with `RegisterDialect` for custom)
+- GORM adapter — full auto-hooks, soft-delete detection
+- Bun adapter — `QueryHook` with snapshot via WHERE-clause parsing
+- Ent adapter — mutation hook with single-row old-values
+- Query builder with typed filters (`DataFilter`, `APIFilter`)
+- In-memory `Store` for tests

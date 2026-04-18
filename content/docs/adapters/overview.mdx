@@ -3,42 +3,57 @@ title: Adapter Overview
 description: Compare Go Audit's ORM adapters and choose the right one.
 ---
 
-Go Audit supports ORMs that expose lifecycle hooks — that's the primary
-requirement for automatic tracking. Three adapters ship with the
-project.
+Go Audit supports ORMs that expose lifecycle hooks — that's the
+primary requirement for automatic tracking. Three adapters ship with
+the project, each in its own sub-module.
 
 ## Comparison Table
 
-| ORM  | Hook Mechanism        | Auto Old Values | Batch Support |
-| ---- | --------------------- | --------------- | ------------- |
-| GORM | Callbacks (plugin)    | Yes             | Yes           |
-| Bun  | Query hooks           | Yes             | Yes           |
-| Ent  | Mutation interceptors | Yes             | Yes           |
+| ORM  | Registration                                | Old-Values Snapshot    | Bulk Old-Values |
+| ---- | ------------------------------------------- | ---------------------- | --------------- |
+| GORM | `db.Use(auditgorm.Plugin(auditor))`         | Yes (`BeforeUpdate`)   | Yes             |
+| Bun  | `auditbun.Register(bunDB, auditor)`         | Yes (pre-query SELECT) | Yes (base DB only) |
+| Ent  | `client.Use(auditent.Hook(auditor))`        | Yes (single-row only)  | No (IDs only)   |
 
-All three deliver the same audit record shape; the integration plumbing
-is what differs.
+All three deliver the same stored record shape; the integration
+plumbing is what differs.
 
-## Why No `sqlx` or `pgx`?
+## Why No `sqlx` / `pgx` / `database/sql`?
 
 Thin SQL wrappers like `sqlx`, `pgx`, and `database/sql` don't have a
 lifecycle model for create/update/delete — they just execute SQL. Go
 Audit needs a hook point to capture old values *before* an update and
 compare them *after*, which these libraries don't provide.
 
-If you need auditing for a raw-SQL app, you have two options:
+If you need auditing for a raw-SQL code path, use the manual entry
+point directly:
 
-1. Wrap your writes in an explicit recording helper that calls
-   `auditor.RecordManual(...)` (manual audit).
-2. Migrate the write path to a supported ORM.
+```go
+_ = auditor.RecordDataChange(ctx, audit.DataEntry{
+    EntityType: "ledger_entries",
+    EntityID:   "le-42",
+    Action:     audit.ActionCreate,
+    NewValues:  map[string]any{"amount": 500},
+})
+```
+
+See the [Data Audit API](/docs/api-reference/data-audit) for the full
+`DataEntry` shape.
 
 ## Choosing an Adapter
 
 - **GORM** — most popular, easiest setup, largest plugin ecosystem.
-  Default choice for new projects.
-- **Bun** — lightweight, explicit query builder feel. Great if you
-  prefer SQL-ish code with strong typing.
+  Has the most complete snapshot coverage (including soft-delete
+  auto-detection). Default choice for new projects.
+- **Bun** — lightweight, explicit query builder feel. Great for
+  SQL-ish code with strong typing. Caveat: snapshots run on the base
+  `*bun.DB`, not within `*bun.Tx`, so uncommitted writes in the same
+  transaction aren't visible.
 - **Ent** — schema-first code generation with rich graph traversal.
-  Pick this if you already build models via `ent codegen`.
+  Best if you already build models via `ent codegen`. Bulk
+  update/delete operations get one audit row per affected ID, but
+  without `old_values` (ent doesn't expose pre-mutation state for
+  bulk ops).
 
 ## Links
 

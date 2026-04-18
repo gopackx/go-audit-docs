@@ -7,50 +7,68 @@ description: Common issues and how to fix them.
 
 Checklist:
 
-- **Plugin registered?** `db.Use(auditgorm.Plugin(auditor))` must be
-  called **before** any CRUD.
-- **Migrated?** `auditor.AutoMigrate()` must have run at least once so
-  the `audit_logs` table exists.
+- **Data audit enabled?** `DataAudit.Enabled` must be `true` in the
+  config. `audit.New` returns an error if neither data nor API audit
+  is enabled, but it's easy to enable only API and forget data.
+- **Plugin registered?** `gormDB.Use(auditgorm.Plugin(auditor))` must
+  be called **before** any CRUD. Same story for Bun
+  (`auditbun.Register`) and Ent (`client.Use`).
+- **Migrated?** `auditor.AutoMigrate(ctx)` must have run at least
+  once so the `audit_logs` table exists.
 - **Entity excluded?** Verify the entity isn't in `ExcludeEntities`.
-- **Context passed through?** Use `db.WithContext(ctx)` — your
+- **Context passed through?** Use `gormDB.WithContext(ctx)` — your
   `UserFunc` needs the context to extract user info.
-- **Hooks not skipped?** `db.Session(&gorm.Session{SkipHooks: true})`
-  disables audit writes. Make sure you're not inadvertently using this.
+- **Hooks not skipped?** `gormDB.Session(&gorm.Session{SkipHooks: true})`
+  disables audit writes.
 
-## `old_values` is always null on update
+## `old_values` is always empty on update
 
-- The `BeforeUpdate` hook didn't run. This is almost always caused by
-  `SkipHooks: true` somewhere in the session chain.
-- If you're using `Updates(map[string]any{...})` make sure at least one
-  primary key column is present in the WHERE so the plugin can fetch
-  the old row.
+- `DataAudit.SkipOldValues` is set to `true`. That's the main cause.
+- The `BeforeUpdate` hook didn't run — usually a `SkipHooks: true`
+  somewhere in the session chain.
+- For `Updates(map[string]any{...})`, make sure the query includes
+  the primary key in the WHERE so the plugin can fetch the old row.
 
-## "table audit_logs does not exist"
+## `"audit_logs does not exist"` (or the custom table name)
 
-Call `auditor.AutoMigrate()` once at startup, before any CRUD. It's
-idempotent — safe to call repeatedly.
+Call `auditor.AutoMigrate(ctx)` once at startup, before any CRUD.
+It's idempotent — safe to call repeatedly — and uses
+`IF NOT EXISTS` everywhere.
 
-## JSON fields stored as empty `{}`
+## `audit.New` returns an error
 
-- Make sure your struct fields are **exported** (capitalized).
-- Add `json:"field_name"` tags so the field is picked up during diff
-  serialization.
+Most common causes:
+
+- `DataAudit.Enabled: true` without a `UserFunc`.
+- Neither `DataAudit.Enabled` nor `APIAudit.Enabled` is true.
+- Invalid `DataAudit.Table` or `APIAudit.Table`. Identifiers must
+  match `^[A-Za-z_][A-Za-z0-9_]{0,62}$`.
+
+## JSON fields stored as empty `{}` or missing
+
+- Make sure struct fields are **exported** (capitalized).
+- The ORM must surface the column in its update payload. For GORM,
+  make sure you're not hitting `.Select(...)` that excludes the field.
 
 ## Redaction not applied
 
-- Check the field name casing. Matching is case-insensitive against
-  both `json` tags and field names.
-- For API calls, confirm the entry is actually going through
-  `Auditor.API().Record(...)` — a direct `INSERT` bypasses redaction.
+- For API audit, confirm the call goes through
+  `auditor.API().Record(ctx, ...)` — a direct `INSERT` bypasses
+  redaction.
+- Case insensitivity is on by default for both headers and body
+  fields, but the match is against the **key name**. An entry like
+  `"Authorization-Bearer"` won't match `"Authorization"`.
 
 ## Performance degradation after enabling Go Audit
 
-- Each update does one extra `SELECT` (for old values) plus one
-  `INSERT`. If your update volume is extreme, see
-  [Production Tips](/docs/guides/production-tips) for async batching.
-- Ensure the audit table indexes are present. Missing indexes on
-  `entity_type`/`entity_id` cause slow reads, not writes, but they're
-  the most common culprit when "audit table queries are slow".
+- Each UPDATE does one extra `SELECT` (to capture old values) plus
+  one `INSERT`. Set `DataAudit.SkipOldValues: true` on hot paths
+  where "before" state isn't needed.
+- Ensure the default indexes exist. Missing indexes on
+  `entity_type`/`entity_id` or `transaction_id` show up as slow
+  reads, not slow writes.
+- If audit volume is very high, partition `audit_logs` by
+  `created_at` and rely on `Purge` or partition-drop for retention.
 
 ## `transaction_id` is empty
 
@@ -60,5 +78,9 @@ You need to stamp the context:
 ctx = audit.WithTransactionID(ctx, audit.NewTransactionID())
 ```
 
-Every write on this `ctx` will carry the ID. Without it, records get
-an empty string.
+Every write on this `ctx` will carry the ID. Without it, records
+still write — they just have an empty `transaction_id`.
+
+You can also set `DataEntry.TransactionID` or `APIEntry.TransactionID`
+explicitly on the entry itself for cases where the context isn't
+convenient to thread through.

@@ -3,48 +3,68 @@ title: audit_api_logs Table
 description: Schema and examples for the API call log table.
 ---
 
-The `audit_api_logs` table records outbound HTTP requests to third-party
-services so you can correlate them with the data changes they drove.
+The `audit_api_logs` table records outbound HTTP requests to
+third-party services so you can correlate them with the data changes
+they drove.
+
+Table name is configurable via `APIAudit.Table`; the default is
+`audit_api_logs`.
 
 ## Schema
 
-| Column            | PostgreSQL     | MySQL                | SQLite     | Description               |
-| ----------------- | -------------- | -------------------- | ---------- | ------------------------- |
-| `id`              | `BIGSERIAL` PK | `BIGINT UNSIGNED` PK | `INTEGER`  | Auto-increment primary key |
-| `service`         | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Service name (`bca`, `jne`) |
-| `endpoint`        | `VARCHAR(500)` | `VARCHAR(500)`       | `TEXT`     | API endpoint path         |
+| Column            | PostgreSQL     | MySQL                | SQLite     | Description                  |
+| ----------------- | -------------- | -------------------- | ---------- | ---------------------------- |
+| `id`              | `BIGSERIAL` PK | `BIGINT UNSIGNED` PK | `INTEGER`  | Auto-increment primary key   |
+| `service`         | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Service name (`bca`, `jne`)  |
+| `endpoint`        | `VARCHAR(500)` | `VARCHAR(500)`       | `TEXT`     | API endpoint path            |
 | `method`          | `VARCHAR(10)`  | `VARCHAR(10)`        | `TEXT`     | `GET`, `POST`, `PUT`, `DELETE` |
-| `status_code`     | `INT`          | `INT`                | `INTEGER`  | HTTP status code          |
-| `request_headers` | `JSONB`        | `JSON`               | `TEXT`     | Request headers (redacted) |
-| `request_body`    | `JSONB`        | `JSON`               | `TEXT`     | Request body (redacted)   |
-| `response_body`   | `JSONB`        | `JSON`               | `TEXT`     | Response body (truncated) |
-| `duration_ms`    | `INT`          | `INT`                | `INTEGER`  | Request duration          |
-| `error_message`   | `TEXT`         | `TEXT`               | `TEXT`     | Error, if failed          |
-| `user_id`         | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Who triggered the call    |
-| `metadata`        | `JSONB`        | `JSON`               | `TEXT`     | Extra context             |
-| `transaction_id`  | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Links to data changes     |
-| `created_at`      | `TIMESTAMPTZ`  | `TIMESTAMP`          | `DATETIME` | When the call was made    |
+| `status_code`     | `INT`          | `INT`                | `INTEGER`  | HTTP status code             |
+| `request_headers` | `JSONB`        | `JSON`               | `TEXT`     | Request headers (redacted)   |
+| `request_body`    | `JSONB`        | `JSON`               | `TEXT`     | Request body (redacted, truncated) |
+| `response_body`   | `JSONB`        | `JSON`               | `TEXT`     | Response body (redacted, truncated) |
+| `duration_ms`     | `INT`          | `INT`                | `INTEGER`  | Request duration             |
+| `error_message`   | `TEXT`         | `TEXT`               | `TEXT`     | Error, if failed             |
+| `user_id`         | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Who triggered the call       |
+| `metadata`        | `JSONB`        | `JSON`               | `TEXT`     | Extra context                |
+| `transaction_id`  | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Links to data changes        |
+| `created_at`      | `TIMESTAMPTZ`  | `TIMESTAMP`          | `DATETIME` | When the call was made       |
+
+## Indexes
+
+All dialects create these indexes:
+
+```
+idx_<table>_service     (service, created_at)
+idx_<table>_status      (status_code)
+idx_<table>_user        (user_id)
+idx_<table>_created     (created_at)
+idx_<table>_transaction (transaction_id)
+```
 
 ## Go Struct
 
 ```go
 type AuditAPILog struct {
-    ID             uint64         `json:"id"`
-    Service        string         `json:"service"`
-    Endpoint       string         `json:"endpoint"`
-    Method         string         `json:"method"`
-    StatusCode     int            `json:"status_code"`
-    RequestHeaders map[string]any `json:"request_headers"`
-    RequestBody    map[string]any `json:"request_body"`
-    ResponseBody   map[string]any `json:"response_body"`
-    DurationMs     int            `json:"duration_ms"`
-    ErrorMessage   string         `json:"error_message"`
-    UserID         string         `json:"user_id"`
-    Metadata       map[string]any `json:"metadata"`
-    TransactionID  string         `json:"transaction_id"`
-    CreatedAt      time.Time      `json:"created_at"`
+    ID             uint64          `json:"id"`
+    Service        string          `json:"service"`
+    Endpoint       string          `json:"endpoint"`
+    Method         string          `json:"method"`
+    StatusCode     int             `json:"status_code"`
+    RequestHeaders json.RawMessage `json:"request_headers,omitempty"`
+    RequestBody    json.RawMessage `json:"request_body,omitempty"`
+    ResponseBody   json.RawMessage `json:"response_body,omitempty"`
+    DurationMs     int             `json:"duration_ms"`
+    ErrorMessage   string          `json:"error_message,omitempty"`
+    UserID         string          `json:"user_id,omitempty"`
+    Metadata       json.RawMessage `json:"metadata,omitempty"`
+    TransactionID  string          `json:"transaction_id,omitempty"`
+    CreatedAt      time.Time       `json:"created_at"`
 }
 ```
+
+`RequestHeaders`, `RequestBody`, `ResponseBody`, and `Metadata` are
+`json.RawMessage` — decode them into whatever shape your caller
+expects.
 
 ## Example Records
 
@@ -56,17 +76,20 @@ type AuditAPILog struct {
   "endpoint": "/v1/transfer",
   "method": "POST",
   "status_code": 200,
-  "request_headers": { "Authorization": "[REDACTED]", "Content-Type": "application/json" },
+  "request_headers": {
+    "Authorization": "***REDACTED***",
+    "Content-Type": "application/json"
+  },
   "request_body": { "amount": 100000, "account": "1234567890" },
   "response_body": { "reference": "BCA-TRX-42", "status": "success" },
   "duration_ms": 842,
   "user_id": "admin-1",
-  "transaction_id": "txn-7f3c",
+  "transaction_id": "20260413T090000-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
   "created_at": "2026-04-13T09:00:00Z"
 }
 ```
 
-**Shipping API call**
+**Truncated response**
 
 ```json
 {
@@ -74,9 +97,13 @@ type AuditAPILog struct {
   "endpoint": "/v2/tracking",
   "method": "GET",
   "status_code": 200,
-  "response_body": { "status": "in_transit", "location": "Jakarta" },
+  "response_body": {
+    "_truncated": true,
+    "original_size": 128512,
+    "preview": "{\"status\":\"in_transit\",\"history\":["
+  },
   "duration_ms": 230,
-  "transaction_id": "txn-7f3c",
+  "transaction_id": "20260413T090000-a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6",
   "created_at": "2026-04-13T09:00:01Z"
 }
 ```

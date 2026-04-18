@@ -4,8 +4,8 @@ description: Use Go Audit with GORM via the auto-hook plugin.
 ---
 
 The GORM adapter registers callbacks on the GORM connection so every
-`Create`, `Save`, `Updates`, and `Delete` is tracked with no changes to
-your model or query code.
+`Create`, `Save`, `Updates`, and `Delete` is tracked with no changes
+to your model or query code.
 
 ## Installation
 
@@ -17,46 +17,72 @@ go get github.com/gopackx/go-audit/adapters/gorm
 
 ```go
 import (
+    "context"
+    "database/sql"
+
     "github.com/gopackx/go-audit"
     auditgorm "github.com/gopackx/go-audit/adapters/gorm"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
 )
 
-auditor := audit.New(db, audit.Config{
+gormDB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+if err != nil {
+    return err
+}
+sqlDB, err := gormDB.DB()
+if err != nil {
+    return err
+}
+
+auditor, err := audit.New(sqlDB, audit.Config{
     Dialect: audit.PostgreSQL,
     UserFunc: func(ctx context.Context) (string, string) {
         return "user-123", "user"
     },
+    DataAudit: audit.DataAuditConfig{Enabled: true},
 })
-
-if err := db.Use(auditgorm.Plugin(auditor)); err != nil {
+if err != nil {
     return err
 }
 
-if err := auditor.AutoMigrate(); err != nil {
+if err := gormDB.Use(auditgorm.Plugin(auditor)); err != nil {
+    return err
+}
+if err := auditor.AutoMigrate(context.Background()); err != nil {
     return err
 }
 ```
 
+> Note the two-step DB handle: `audit.New` takes the underlying
+> `*sql.DB` (from `gormDB.DB()`), while `Plugin` attaches to the
+> `*gorm.DB`.
+
 ## How It Works
 
-The plugin registers four callbacks:
+The plugin registers five callbacks:
 
-- `BeforeUpdate` — fetches the current row via `SELECT` so it can record
-  old values. Bypassed automatically when the query already supplies the
-  old record (e.g. `db.Save`).
-- `AfterCreate` — records `new_values` with `action = "create"`.
-- `AfterUpdate` — diffs old vs new and records only the changed fields
-  with `action = "update"`.
-- `AfterDelete` — records `old_values` with `action = "delete"`.
+- `after_create` — records `ActionCreate` with `new_values`.
+- `before_update` — snapshots the current row via `SELECT` (unless
+  `DataAudit.SkipOldValues` is set).
+- `after_update` — diffs the snapshot against the new values,
+  records `ActionUpdate` with only the changed fields.
+- `before_delete` — snapshots the row; detects soft deletes via
+  presence of a `deleted_at` field.
+- `after_delete` — records `ActionDelete` (hard delete) or
+  `ActionSoftDelete` (soft delete via `gorm.DeletedAt`).
+
+Errors from audit writes are attached to the `*gorm.DB` via
+`AddError`, so callers see them via `db.Error`.
 
 ## Supported Operations
 
-- `db.Create()`
+- `db.Create()` / `db.CreateInBatches()`
 - `db.Save()`
-- `db.Updates()` (including map-based updates)
-- `db.Delete()`
-- Batch operations — all affected rows share one `transaction_id`
-- Soft deletes — recorded as `delete` when GORM soft delete is enabled
+- `db.Updates()` (struct or `map[string]any`)
+- `db.UpdateColumn()` / `db.UpdateColumns()`
+- `db.Delete()` — hard and soft deletes
+- Bulk operations — all affected rows share one `transaction_id`
 
 ## Configuration
 
@@ -68,21 +94,31 @@ audit.Config{
         Table:           "audit_logs", // override table name
         ExcludeFields:   []string{"password", "token"},
         ExcludeEntities: []string{"sessions"},
+        SkipOldValues:   false, // true = skip pre-UPDATE SELECT
+        OnError:         audit.ErrorFailLoud,
     },
     UserFunc: func(ctx context.Context) (string, string) {
-        // return user ID and user type, extracted from context
         return "user-123", "user"
     },
 }
 ```
 
+## Soft Delete Detection
+
+If your model includes a `gorm.DeletedAt` field, GORM performs an
+UPDATE rather than a DELETE. The adapter detects this and records
+the action as `"soft_delete"` with the new `deleted_at` value in
+`new_values`. Hard deletes (e.g. `.Unscoped().Delete()`) are recorded
+as `"delete"` with `new_values: null`.
+
 ## Caveats
 
-- Raw SQL executed via `db.Exec()` bypasses GORM's callbacks and will
-  **not** be audited. Use model-based calls when you want audit trail.
-- `db.Session(&gorm.Session{SkipHooks: true})` explicitly skips audit.
-- Queries that don't go through GORM (`database/sql` on the same
-  connection, for example) are not audited.
+- Raw SQL executed via `db.Exec()` bypasses GORM's callbacks and is
+  **not** audited. Use model-based calls when you want audit trail.
+- `db.Session(&gorm.Session{SkipHooks: true})` explicitly skips audit
+  writes.
+- Queries that don't go through GORM (e.g. direct `database/sql` on
+  the same connection) are not audited.
 
 ## Related
 

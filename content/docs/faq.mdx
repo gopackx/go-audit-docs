@@ -5,23 +5,28 @@ description: Frequently asked questions about Go Audit.
 
 ## Does Go Audit work with `sqlx` or raw `database/sql`?
 
-No. Go Audit requires ORM lifecycle hooks to auto-track changes. `sqlx`
-and `database/sql` are thin SQL wrappers without hooks, so there's no
-way to intercept create/update/delete. Use a supported ORM: GORM, Bun,
-or Ent.
+The ORM adapters don't — they rely on GORM / Bun / Ent lifecycle
+hooks. But the core `Auditor` exposes `RecordDataChange(ctx, entry)`,
+which you can call manually from any code path (including raw SQL,
+`sqlx`, background jobs, or imports). See
+[Migrating from Manual Audit](/docs/guides/migration-from-manual).
 
 ## Does Go Audit make HTTP calls?
 
-No. The core package has zero network dependencies. It only writes to
-the database connection you provide. API call logging records calls
-**you** make — Go Audit never originates requests.
+No. The core package has zero network dependencies. It only writes
+to the database connection you provide. API call logging records
+calls **you** make — Go Audit never originates requests.
 
 ## Will audit logs slow down my application?
 
-Minimal impact. Each CRUD adds one `INSERT` to the audit table. The
-diff computation is in-memory and sub-millisecond. For high-throughput
-workloads, see [Production Tips](/docs/guides/production-tips) for
-async writing and batch insert strategies.
+Minimal impact. Each CRUD adds one `INSERT` to the audit table. On
+UPDATE, there's one extra `SELECT` to snapshot old values (which you
+can disable via `DataAudit.SkipOldValues` if you don't need that
+detail). The diff computation is in-memory and sub-millisecond.
+
+For high-throughput workloads, see
+[Production Tips](/docs/guides/production-tips) for async batching,
+retention, and `SkipOldValues`.
 
 ## Can I use custom table names?
 
@@ -29,22 +34,31 @@ Yes. Configure via `DataAudit.Table` and `APIAudit.Table`:
 
 ```go
 audit.Config{
-    DataAudit: audit.DataAuditConfig{Table: "app_audit"},
-    APIAudit:  audit.APIAuditConfig{Table: "app_api_audit"},
+    DataAudit: audit.DataAuditConfig{Enabled: true, Table: "app_audit"},
+    APIAudit:  audit.APIAuditConfig{Enabled: true, Table: "app_api_audit"},
 }
 ```
 
+Table names must match `^[A-Za-z_][A-Za-z0-9_]{0,62}$` — standard
+SQL identifier rules.
+
 ## Does it support soft deletes?
 
-Yes, for GORM with soft delete enabled. The action is recorded as
-`delete` with the soft-deleted record's values in `old_values`.
+Yes, for GORM with `gorm.DeletedAt`. The action is recorded as
+`soft_delete` (with the `deleted_at` timestamp in `new_values`) so
+it's distinguishable from a hard `delete`. Bun and Ent don't have
+first-class soft-delete detection in the adapter.
 
 ## How do I audit bulk/batch operations?
 
 Batch operations are automatically grouped under a shared
-`transaction_id`. Each affected record gets its own `audit_logs` entry,
-and you can fetch them all at once with
+`transaction_id`. Each affected record gets its own `audit_logs`
+entry, and you can fetch them all at once with
 `auditor.QueryByTransaction(ctx, txID)`.
+
+On the Ent adapter, bulk UPDATE/DELETE records lack `old_values`
+(Ent does not expose pre-mutation state for bulk operations). GORM
+and Bun capture old values for bulk writes.
 
 ## Can I disable auditing for specific tables?
 
@@ -52,12 +66,35 @@ Yes. Add the table name to `ExcludeEntities`:
 
 ```go
 DataAudit: audit.DataAuditConfig{
+    Enabled:         true,
     ExcludeEntities: []string{"sessions", "cache_entries"},
 }
 ```
 
 ## What happens to excluded fields?
 
-Fields listed in `ExcludeFields` are stored as `"[EXCLUDED]"` in the
-audit record so you can see that a field changed without exposing the
-value. Passwords, tokens, and secrets are the typical use case.
+They're **dropped** from the audit record — the field name doesn't
+appear in `old_values` or `new_values` at all. If the only field
+that changed in an UPDATE was excluded, the entire UPDATE record is
+suppressed (no row is written).
+
+This is different from API call redaction, where sensitive headers
+and body fields are replaced with `"***REDACTED***"` so the shape of
+the call is preserved.
+
+## Can I reconstruct what a record looked like in the past?
+
+Yes. `auditor.Snapshot(ctx, entityType, entityID, at)` replays audit
+history up to `at` and returns the reconstructed field map. If the
+record didn't exist or had been deleted at that time, it returns
+`nil`.
+
+`Restore` extends this to actually write a `restore` audit entry and
+return the target values for you to apply via your ORM.
+
+## How do I enforce a retention policy?
+
+Use `auditor.Purge(ctx, before)` from a daily cron. It deletes rows
+older than `before` from both `audit_logs` and `audit_api_logs` (if
+enabled). See [Production Tips](/docs/guides/production-tips) for
+partitioning as a higher-scale alternative.

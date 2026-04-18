@@ -3,9 +3,9 @@ title: Field Exclusion
 description: Exclude sensitive fields like password and token from being audited.
 ---
 
-Some fields shouldn't appear in audit logs — passwords, refresh tokens,
-card numbers. Go Audit has two levers: per-field exclusion and
-per-entity exclusion.
+Some fields shouldn't appear in audit logs — passwords, refresh
+tokens, card numbers. Go Audit has two levers: per-field exclusion
+and per-entity exclusion.
 
 ## Per-Field Exclusion
 
@@ -15,19 +15,25 @@ DataAudit: audit.DataAuditConfig{
 }
 ```
 
-Matching fields are recorded as `"[EXCLUDED]"` in both `old_values` and
-`new_values`. The audit record shows that the field changed without
-leaking the value.
+Matching fields are **dropped** from both `old_values` and
+`new_values` before the audit row is written. The audit record does
+not mention them at all.
+
+If the **only** field that changed in an update is excluded, the whole
+UPDATE record is suppressed — no row is written.
 
 **Matching rules**
 
-- Case-insensitive.
-- Matched against the struct's `json` tag first, then the field name.
-- Nested struct fields are also checked.
+- **Case-sensitive** on the map key.
+- Matched against the key produced by the ORM adapter, which is the
+  DB column name in practice.
+- Only top-level keys are checked; nested JSON structures are not
+  walked for field exclusion.
 
 ## Per-Entity Exclusion
 
-To skip an entity entirely (no audit record at all):
+To skip an entity entirely (no audit record at all, regardless of
+fields):
 
 ```go
 DataAudit: audit.DataAuditConfig{
@@ -40,15 +46,23 @@ signal.
 
 ## Comparison
 
-| Behavior           | ExcludeFields       | ExcludeEntities |
-| ------------------ | ------------------- | --------------- |
-| Record written     | Yes                 | No              |
-| Value stored       | `"[EXCLUDED]"`      | N/A             |
-| Change detectable  | Yes                 | No              |
+| Behavior                        | `ExcludeFields` | `ExcludeEntities` |
+| ------------------------------- | --------------- | ----------------- |
+| Row written on other-field change | Yes             | No                |
+| Row written on excluded-only change | No              | No                |
+| Value stored                    | field omitted   | N/A               |
+| Change detectable externally    | No (for that field) | No            |
+
+## API Call Fields
+
+For outbound API calls, sensitive fields are **masked** with
+`"***REDACTED***"` rather than dropped — see
+[Auto Redaction](/docs/features/redaction) for the different
+semantics and rationale.
 
 ## Dynamic Exclusion
 
-If exclusion needs to depend on context (per-tenant policy, for
-example), layer it at the ORM level by using a custom session that
-doesn't go through the audit plugin — or run two `Auditor` instances
-with different configs.
+Exclusion is a static config on the `Auditor`. If exclusion needs to
+depend on context (per-tenant policy, for example), run two
+`Auditor` instances with different configs and route writes to the
+one whose policy applies.

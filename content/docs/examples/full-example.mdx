@@ -4,8 +4,8 @@ description: End-to-end e-commerce flow — order, payment, shipping — all cor
 ---
 
 A single customer checkout touches several systems: the order table,
-the payment gateway, and the shipping provider. This example shows all
-three linked under one `transaction_id`.
+the payment gateway, and the shipping provider. This example shows
+all three linked under one `transaction_id`.
 
 ## Complete Code
 
@@ -14,6 +14,8 @@ package main
 
 import (
     "context"
+    "fmt"
+    "log"
     "net/http"
     "time"
 
@@ -32,10 +34,15 @@ type Order struct {
     TrackingNumber string
 }
 
-func Checkout(db *gorm.DB, auditor *audit.Auditor, customerID string, amount int) error {
-    txID := audit.NewTransactionID()
-    ctx := audit.WithTransactionID(context.Background(), txID)
-    tx := db.WithContext(ctx)
+func Checkout(
+    ctx context.Context,
+    gormDB *gorm.DB,
+    auditor audit.Auditor,
+    customerID string,
+    amount int,
+) error {
+    ctx = audit.WithTransactionID(ctx, audit.NewTransactionID())
+    tx := gormDB.WithContext(ctx)
 
     // 1. Create order (audit_logs: create)
     order := Order{CustomerID: customerID, Amount: amount, Status: "pending"}
@@ -86,16 +93,30 @@ func Checkout(db *gorm.DB, auditor *audit.Auditor, customerID string, amount int
 }
 
 func main() {
-    db, _ := gorm.Open(postgres.Open("..."), &gorm.Config{})
-    auditor := audit.New(db, audit.Config{
-        Dialect:  audit.PostgreSQL,
-        UserFunc: func(ctx context.Context) (string, string) { return "user-1", "user" },
-        APIAudit: audit.APIAuditConfig{Enabled: true},
-    })
-    _ = db.Use(auditgorm.Plugin(auditor))
-    _ = auditor.AutoMigrate()
+    gormDB, err := gorm.Open(postgres.Open("..."), &gorm.Config{})
+    if err != nil {
+        log.Fatal(err)
+    }
+    sqlDB, err := gormDB.DB()
+    if err != nil {
+        log.Fatal(err)
+    }
 
-    _ = Checkout(db, auditor, "cust-42", 250000)
+    auditor, err := audit.New(sqlDB, audit.Config{
+        Dialect:   audit.PostgreSQL,
+        UserFunc:  func(ctx context.Context) (string, string) { return "user-1", "user" },
+        DataAudit: audit.DataAuditConfig{Enabled: true},
+        APIAudit:  audit.APIAuditConfig{Enabled: true},
+    })
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    _ = gormDB.Use(auditgorm.Plugin(auditor))
+    _ = auditor.AutoMigrate(context.Background())
+
+    _ = Checkout(context.Background(), gormDB, auditor, "cust-42", 250000)
+    _ = fmt.Println
 }
 ```
 
@@ -125,3 +146,13 @@ for _, a := range trail.APILogs {
 
 This is the full timeline of one customer checkout — queryable
 whenever you need it.
+
+## Retention
+
+Run a daily job that trims old audit rows:
+
+```go
+cutoff := time.Now().AddDate(-1, 0, 0) // 1 year
+result, _ := auditor.Purge(ctx, cutoff)
+log.Printf("purged data=%d api=%d", result.DataLogs, result.APILogs)
+```

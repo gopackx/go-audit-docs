@@ -3,8 +3,8 @@ title: Quick Start
 description: A complete runnable example with GORM and PostgreSQL.
 ---
 
-This example wires Go Audit into a GORM + PostgreSQL app and shows audit
-logs appearing automatically after CRUD operations.
+This example wires Go Audit into a GORM + PostgreSQL app and shows
+audit logs appearing automatically after CRUD operations.
 
 ## The Full Program
 
@@ -28,18 +28,26 @@ type User struct {
     Email string
 }
 
+type ctxKey string
+
+const userIDKey ctxKey = "user_id"
+
 func main() {
     dsn := "host=localhost user=postgres password=postgres dbname=demo port=5432 sslmode=disable"
-    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    gormDB, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    if err != nil {
+        log.Fatal(err)
+    }
+    sqlDB, err := gormDB.DB()
     if err != nil {
         log.Fatal(err)
     }
 
-    // 1. Configure the auditor.
-    auditor := audit.New(db, audit.Config{
+    // 1. Configure the auditor. Note: takes *sql.DB, not *gorm.DB.
+    auditor, err := audit.New(sqlDB, audit.Config{
         Dialect: audit.PostgreSQL,
         UserFunc: func(ctx context.Context) (string, string) {
-            if uid, ok := ctx.Value("user_id").(string); ok {
+            if uid, ok := ctx.Value(userIDKey).(string); ok {
                 return uid, "user"
             }
             return "system", "system"
@@ -49,32 +57,35 @@ func main() {
             ExcludeFields: []string{"password", "token"},
         },
     })
+    if err != nil {
+        log.Fatal(err)
+    }
 
     // 2. Register the GORM plugin.
-    if err := db.Use(auditgorm.Plugin(auditor)); err != nil {
+    if err := gormDB.Use(auditgorm.Plugin(auditor)); err != nil {
         log.Fatal(err)
     }
 
-    // 3. Create audit tables.
-    if err := auditor.AutoMigrate(); err != nil {
+    // 3. Create audit tables (idempotent).
+    ctx := context.Background()
+    if err := auditor.AutoMigrate(ctx); err != nil {
         log.Fatal(err)
     }
-    if err := db.AutoMigrate(&User{}); err != nil {
+    if err := gormDB.AutoMigrate(&User{}); err != nil {
         log.Fatal(err)
     }
 
-    ctx := context.WithValue(context.Background(), "user_id", "admin-1")
-    tx := db.WithContext(ctx)
+    // 4. Attach a user to the context so UserFunc can resolve it.
+    ctx = context.WithValue(ctx, userIDKey, "admin-1")
+    tx := gormDB.WithContext(ctx)
 
-    // 4. Perform CRUD — audit logs appear automatically.
+    // 5. Perform CRUD — audit logs appear automatically.
     user := User{Name: "Ada Lovelace", Email: "ada@example.com"}
     tx.Create(&user)
-
     tx.Model(&user).Update("Email", "ada.l@example.com")
-
     tx.Delete(&user)
 
-    // 5. Query the audit trail.
+    // 6. Query the audit trail.
     logs, _ := auditor.Query(ctx, audit.DataFilter{EntityType: "users"})
     for _, l := range logs {
         fmt.Printf("%s %s by %s\n", l.Action, l.EntityID, l.UserID)
@@ -84,23 +95,32 @@ func main() {
 
 ## Step-by-Step Walkthrough
 
-1. **Configure the auditor.** Pass the DB, dialect, a `UserFunc` for
-   context-aware attribution, and any fields you want excluded.
-2. **Register the GORM plugin.** `db.Use(auditgorm.Plugin(auditor))`
-   installs all lifecycle callbacks.
-3. **Run auto-migration.** `auditor.AutoMigrate()` creates the
-   `audit_logs` (and optionally `audit_api_logs`) tables.
-4. **Perform CRUD normally.** Every `Create`, `Save`, `Updates`, and
-   `Delete` is captured automatically. Use `db.WithContext(ctx)` so the
-   `UserFunc` receives the caller's context.
+1. **Extract the `*sql.DB`.** Go Audit writes through `database/sql`,
+   so call `gormDB.DB()` and pass the underlying `*sql.DB` to
+   `audit.New`.
+2. **Configure the auditor.** Set the dialect explicitly, provide a
+   `UserFunc` that reads user identity from the context, and turn on
+   `DataAudit.Enabled`.
+3. **Register the GORM plugin.** `gormDB.Use(auditgorm.Plugin(auditor))`
+   installs all lifecycle callbacks on the GORM connection.
+4. **Run auto-migration.** `auditor.AutoMigrate(ctx)` creates the
+   `audit_logs` (and optionally `audit_api_logs`) tables. Safe to call
+   repeatedly — all DDL uses `IF NOT EXISTS`.
+5. **Perform CRUD normally.** Every `Create`, `Save`, `Updates`, and
+   `Delete` is captured automatically. Use `gormDB.WithContext(ctx)`
+   so the `UserFunc` receives the caller's context.
 
-## Verify It Works
+## Expected Output
 
 ```
 create 1 by admin-1
 update 1 by admin-1
-delete 1 by admin-1
+soft_delete 1 by admin-1
 ```
+
+The third line appears as `soft_delete` instead of `delete` only if
+`User` has a `gorm.DeletedAt` field. Without soft delete, you'll see
+`delete` instead.
 
 ## Next Steps
 

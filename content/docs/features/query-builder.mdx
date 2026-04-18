@@ -4,50 +4,98 @@ description: Filter audit logs by entity, user, action, date range, and more.
 ---
 
 Querying audit logs is done through typed filter structs rather than
-raw SQL. Filters translate into dialect-aware queries automatically.
+raw SQL. Filters translate into parameterized queries using the
+dialect's placeholder style.
 
 ## Data Audit Filters
 
 ```go
 logs, err := auditor.Query(ctx, audit.DataFilter{
-    EntityType: "orders",
-    EntityID:   "42",
-    Action:     audit.ActionUpdate,
-    UserID:     "admin-1",
-    DateFrom:   time.Now().Add(-24 * time.Hour),
-    DateTo:     time.Now(),
-    Limit:      50,
-    Offset:     0,
+    EntityType:    "orders",
+    EntityID:      "42",
+    Action:        audit.ActionUpdate,
+    UserID:        "admin-1",
+    TransactionID: "20260418T142318-9f3c2a71c8e4d2b15c90a63e4f712b88",
+    DateFrom:      time.Now().Add(-24 * time.Hour),
+    DateTo:        time.Now(),
+    Limit:         50,
+    Offset:        0,
 })
 ```
 
+Full field list:
+
+```go
+type DataFilter struct {
+    EntityType    string
+    EntityID      string
+    Action        string
+    UserID        string
+    TransactionID string
+    DateFrom      time.Time
+    DateTo        time.Time
+    Limit         int
+    Offset        int
+}
+```
+
 All fields are optional. Leave a field at its zero value to skip that
-filter.
+filter. Non-zero values are combined with AND.
 
 ## API Call Filters
 
 ```go
 calls, err := auditor.API().Query(ctx, audit.APIFilter{
     Service:    "bca",
-    Method:     http.MethodPost,
     StatusCode: 500, // only failures
     DateFrom:   time.Now().Add(-1 * time.Hour),
     Limit:      100,
 })
 ```
 
+Full field list:
+
+```go
+type APIFilter struct {
+    Service       string
+    StatusCode    int
+    UserID        string
+    TransactionID string
+    DateFrom      time.Time
+    DateTo        time.Time
+    Limit         int
+    Offset        int
+}
+```
+
+`APIFilter` intentionally does not expose `Method` or `Endpoint`
+filters — filter on `Service` plus `TransactionID` or a date range.
+
 ## Ordering and Pagination
 
 - Default order is `created_at DESC` (newest first).
-- Use `Limit` + `Offset` for pagination.
+- Use `Limit` + `Offset` for offset pagination.
 
 ```go
 page1, _ := auditor.Query(ctx, audit.DataFilter{Limit: 25, Offset: 0})
 page2, _ := auditor.Query(ctx, audit.DataFilter{Limit: 25, Offset: 25})
 ```
 
-## Combining With Transaction Queries
+For very large tables, prefer keyset pagination: use `DateTo` set to
+the last returned row's `CreatedAt` to walk forward in time.
 
-For the full picture of a transaction, use
+## Cross-Query by Transaction
+
+For the full picture of one transaction, use
 [`QueryByTransaction`](/docs/features/transaction-correlation) — it
-returns data changes and API calls in one call.
+returns the data changes and API calls in a single call.
+
+## Action Constants
+
+```go
+audit.ActionCreate     // "create"
+audit.ActionUpdate     // "update"
+audit.ActionDelete     // "delete"
+audit.ActionSoftDelete // "soft_delete"
+audit.ActionRestore    // "restore"
+```

@@ -3,59 +3,70 @@ title: audit_logs Table
 description: Schema and examples for the data audit log table.
 ---
 
-The `audit_logs` table records every create, update, and delete captured
-by an ORM adapter.
+The `audit_logs` table records every create, update, and delete
+captured by an ORM adapter (plus manual `RecordDataChange` calls).
+
+Table name is configurable via `DataAudit.Table`; the default is
+`audit_logs`.
 
 ## Schema
 
-| Column           | PostgreSQL     | MySQL                | SQLite     | Description                |
-| ---------------- | -------------- | -------------------- | ---------- | -------------------------- |
-| `id`             | `BIGSERIAL` PK | `BIGINT UNSIGNED` PK | `INTEGER`  | Auto-increment primary key |
-| `entity_type`    | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Table/model name           |
-| `entity_id`      | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Record ID                  |
-| `action`         | `VARCHAR(20)`  | `VARCHAR(20)`        | `TEXT`     | `create`, `update`, `delete` |
-| `old_values`     | `JSONB`        | `JSON`               | `TEXT`     | Values before change       |
-| `new_values`     | `JSONB`        | `JSON`               | `TEXT`     | Values after change        |
-| `user_id`        | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Who made the change        |
-| `user_type`      | `VARCHAR(50)`  | `VARCHAR(50)`        | `TEXT`     | `user`, `admin`, `system`  |
-| `metadata`       | `JSONB`        | `JSON`               | `TEXT`     | IP, user agent, reason     |
-| `transaction_id` | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Groups related operations  |
-| `created_at`     | `TIMESTAMPTZ`  | `TIMESTAMP`          | `DATETIME` | When the change occurred   |
+| Column           | PostgreSQL     | MySQL                | SQLite     | Description                        |
+| ---------------- | -------------- | -------------------- | ---------- | ---------------------------------- |
+| `id`             | `BIGSERIAL` PK | `BIGINT UNSIGNED` PK | `INTEGER`  | Auto-increment primary key         |
+| `entity_type`    | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Table / model name                 |
+| `entity_id`      | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Record identifier (JSON for compound PKs) |
+| `action`         | `VARCHAR(20)`  | `VARCHAR(20)`        | `TEXT`     | `create`, `update`, `delete`, `soft_delete`, `restore` |
+| `old_values`     | `JSONB`        | `JSON`               | `TEXT`     | Values before change (nullable)    |
+| `new_values`     | `JSONB`        | `JSON`               | `TEXT`     | Values after change (nullable)     |
+| `user_id`        | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Who made the change                |
+| `user_type`      | `VARCHAR(50)`  | `VARCHAR(50)`        | `TEXT`     | `user`, `admin`, `system`, …       |
+| `metadata`       | `JSONB`        | `JSON`               | `TEXT`     | Extra context (IP, reason, …)      |
+| `transaction_id` | `VARCHAR(100)` | `VARCHAR(100)`       | `TEXT`     | Groups related operations          |
+| `created_at`     | `TIMESTAMPTZ`  | `TIMESTAMP`          | `DATETIME` | When the change occurred           |
 
 ## Indexes
 
-**PostgreSQL**
+All dialects create these indexes:
 
-```sql
-CREATE INDEX idx_audit_entity     ON audit_logs (entity_type, entity_id);
-CREATE INDEX idx_audit_user       ON audit_logs (user_id);
-CREATE INDEX idx_audit_tx         ON audit_logs (transaction_id);
-CREATE INDEX idx_audit_created_at ON audit_logs (created_at DESC);
-CREATE INDEX idx_audit_old_gin    ON audit_logs USING GIN (old_values);
-CREATE INDEX idx_audit_new_gin    ON audit_logs USING GIN (new_values);
+```
+idx_<table>_entity      (entity_type, entity_id)
+idx_<table>_user        (user_id, created_at)
+idx_<table>_action      (action)
+idx_<table>_created     (created_at)
+idx_<table>_transaction (transaction_id)
 ```
 
-**MySQL / SQLite**
+PostgreSQL additionally creates:
 
-Same as PostgreSQL minus the GIN indexes — standard B-tree only.
+```
+idx_<table>_old_values  USING GIN (old_values)
+idx_<table>_new_values  USING GIN (new_values)
+```
+
+MySQL declares its indexes inline in the `CREATE TABLE` statement;
+SQLite and PostgreSQL use separate `CREATE INDEX` statements.
 
 ## Go Struct
 
 ```go
 type AuditLog struct {
-    ID            uint64         `json:"id"`
-    EntityType    string         `json:"entity_type"`
-    EntityID      string         `json:"entity_id"`
-    Action        string         `json:"action"`
-    OldValues     map[string]any `json:"old_values"`
-    NewValues     map[string]any `json:"new_values"`
-    UserID        string         `json:"user_id"`
-    UserType      string         `json:"user_type"`
-    Metadata      map[string]any `json:"metadata"`
-    TransactionID string         `json:"transaction_id"`
-    CreatedAt     time.Time      `json:"created_at"`
+    ID            uint64          `json:"id"`
+    EntityType    string          `json:"entity_type"`
+    EntityID      string          `json:"entity_id"`
+    Action        string          `json:"action"`
+    OldValues     json.RawMessage `json:"old_values,omitempty"`
+    NewValues     json.RawMessage `json:"new_values,omitempty"`
+    UserID        string          `json:"user_id"`
+    UserType      string          `json:"user_type,omitempty"`
+    Metadata      json.RawMessage `json:"metadata,omitempty"`
+    TransactionID string          `json:"transaction_id,omitempty"`
+    CreatedAt     time.Time       `json:"created_at"`
 }
 ```
+
+`OldValues`, `NewValues`, and `Metadata` are `json.RawMessage` so you
+can decode them into whatever shape your application expects.
 
 ## Example Records
 
@@ -74,7 +85,7 @@ type AuditLog struct {
 }
 ```
 
-**Update** — only the changed field is stored:
+**Update** — only changed fields are stored:
 
 ```json
 {
@@ -88,7 +99,21 @@ type AuditLog struct {
 }
 ```
 
-**Delete**
+**Soft delete** — GORM + `gorm.DeletedAt`:
+
+```json
+{
+  "entity_type": "users",
+  "entity_id": "42",
+  "action": "soft_delete",
+  "old_values": { "name": "Ada", "email": "ada.l@example.com", "deleted_at": null },
+  "new_values": { "deleted_at": "2026-04-13T09:10:00Z" },
+  "user_id": "admin-1",
+  "created_at": "2026-04-13T09:10:00Z"
+}
+```
+
+**Delete** — hard delete:
 
 ```json
 {

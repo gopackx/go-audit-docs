@@ -9,11 +9,13 @@ write any diff code — it happens inside the ORM hooks.
 
 ## How It Works
 
-1. The `BeforeUpdate` hook fires. Go Audit issues a `SELECT` for the
-   current row and captures it as the "old" snapshot.
-2. The ORM performs the update.
-3. The `AfterUpdate` hook fires. Go Audit compares the old snapshot
-   with the new struct field-by-field.
+1. The `BeforeUpdate` / `BeforeDelete` hook fires (unless
+   `DataAudit.SkipOldValues` is set). Go Audit issues a `SELECT` for
+   the affected row(s) and captures it as the "old" snapshot.
+2. The ORM performs the write.
+3. The `AfterUpdate` / `AfterDelete` hook fires. Go Audit compares the
+   old snapshot with the new values field-by-field using
+   `reflect.DeepEqual`.
 4. Only the fields whose values changed are written into `old_values`
    and `new_values`.
 
@@ -29,36 +31,49 @@ Given an update that only changes `email`, the audit record looks like:
 }
 ```
 
-`name`, `created_at`, and every other unchanged field are omitted. The
-payload stays small even for wide tables.
+`name`, `created_at`, and every other unchanged field are omitted, so
+the payload stays small even for wide tables.
 
-## Nested Structs
+## Per-Action Behavior
 
-Embedded and nested structs are walked recursively. A change to a
-single leaf field produces a diff that only contains that path:
+| Action         | `old_values`                   | `new_values`                   |
+| -------------- | ------------------------------ | ------------------------------ |
+| `create`       | `null`                         | all fields                     |
+| `update`       | only changed fields            | only changed fields            |
+| `delete`       | all fields                     | `null`                         |
+| `soft_delete`  | all fields                     | updated fields (e.g. `deleted_at`) |
+| `restore`      | current state                  | target historical state        |
 
-```json
-{
-  "old_values": { "address": { "city": "Jakarta" } },
-  "new_values": { "address": { "city": "Bandung" } }
-}
-```
+## Nested Values
+
+Diffing uses `reflect.DeepEqual` on each top-level column value. If a
+column holds a nested struct or JSON blob, the **whole value** appears
+in `old_values`/`new_values` when any nested field changes — Go Audit
+does not produce partial diffs inside a single column.
 
 ## Excluded Fields
 
-Fields listed in `DataAudit.ExcludeFields` are detected as changed (so
-you can see *that* they changed) but the value is replaced with
-`"[EXCLUDED]"`:
+Fields listed in `DataAudit.ExcludeFields` are **dropped** from both
+`old_values` and `new_values` before persistence. Matching is
+case-sensitive on the map key (which is normally the DB column name
+produced by the ORM).
 
-```json
-{
-  "old_values": { "password": "[EXCLUDED]" },
-  "new_values": { "password": "[EXCLUDED]" }
+```go
+DataAudit: audit.DataAuditConfig{
+    ExcludeFields: []string{"password", "token"},
 }
 ```
 
+With that config, no record ever mentions the `password` or `token`
+fields — they simply don't appear. If every field changed was in
+`ExcludeFields`, the audit entry is skipped entirely.
+
 ## When Diff Is Skipped
 
-- No fields changed — no audit record is written.
-- The entity is in `ExcludeEntities` — no record is written.
-- The session has `SkipHooks: true` — hooks don't fire at all.
+- **No fields changed** after exclusion — the UPDATE record is
+  suppressed entirely (no noise from no-op updates).
+- **The entity is in `ExcludeEntities`** — no record is written.
+- **`DataAudit.SkipOldValues == true`** — the pre-UPDATE `SELECT` is
+  skipped; `old_values` will be empty but the record is still written.
+- **The session skips hooks** (e.g. `gorm.Session{SkipHooks: true}`)
+  — hooks don't fire at all.

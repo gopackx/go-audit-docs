@@ -5,8 +5,8 @@ description: Install Go Audit core and your ORM adapter.
 
 ## Requirements
 
-- Go 1.21 or later
-- One of: GORM, Bun, or Ent
+- Go **1.22** or later
+- One of: GORM, Bun, or Ent (the core itself only needs `database/sql`)
 - A supported database: PostgreSQL, MySQL, or SQLite
 
 ## Install Core
@@ -15,9 +15,13 @@ description: Install Go Audit core and your ORM adapter.
 go get github.com/gopackx/go-audit
 ```
 
+The core package depends only on the Go standard library — no external
+drivers, no HTTP clients.
+
 ## Install ORM Adapter
 
-Pick the adapter that matches your ORM:
+Pick the adapter that matches your ORM. Each is a separate module so
+you only pull in the ORM you actually use.
 
 | ORM  | Package                                            |
 | ---- | -------------------------------------------------- |
@@ -27,19 +31,26 @@ Pick the adapter that matches your ORM:
 
 ## Supported Databases
 
-| Database   | JSON Type | Index Support       |
-| ---------- | --------- | ------------------- |
-| PostgreSQL | `JSONB`   | GIN index on JSON   |
-| MySQL      | `JSON`    | Standard B-tree     |
-| SQLite     | `TEXT`    | Standard B-tree     |
+| Database   | JSON Type | Index Strategy                   |
+| ---------- | --------- | -------------------------------- |
+| PostgreSQL | `JSONB`   | B-tree + GIN indexes on JSON     |
+| MySQL      | `JSON`    | Inline B-tree indexes            |
+| SQLite     | `TEXT`    | B-tree indexes                   |
 
-The adapter auto-detects your dialect. You can also set it explicitly:
+## Set the Dialect
+
+The dialect is **not auto-detected** — you always set it explicitly on
+the config:
 
 ```go
 audit.Config{
     Dialect: audit.PostgreSQL, // or audit.MySQL, audit.SQLite
 }
 ```
+
+Valid values are the constants `audit.PostgreSQL`, `audit.MySQL`, and
+`audit.SQLite`. Custom dialects can be registered via
+`audit.RegisterDialect` — see the [Dialect reference](/docs/api-reference/dialect).
 
 ## Next Step
 

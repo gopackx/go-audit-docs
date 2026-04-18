@@ -1,58 +1,70 @@
 ---
 title: Multi-Database Support
-description: First-class PostgreSQL, MySQL, and SQLite with dialect-aware storage and querying.
+description: First-class PostgreSQL, MySQL, and SQLite with dialect-aware storage.
 ---
 
 Go Audit ships with three dialect implementations. Each generates
-schema, stores JSON, and queries in the way that is most efficient for
-the database.
+schema DDL, places parameter placeholders, and chooses a JSON storage
+strategy appropriate for its database.
 
 ## PostgreSQL
 
-- `JSONB` for `old_values`, `new_values`, `metadata`
-- `GIN` indexes on JSON columns for fast key/value lookups
-- `TIMESTAMPTZ` for `created_at`
-
-PostgreSQL is the default and performs best for ad-hoc queries against
-JSON-valued fields.
+- `JSONB` for `old_values`, `new_values`, `request_headers`,
+  `request_body`, `response_body`, `metadata`
+- GIN indexes on `old_values` and `new_values` for JSON key lookups
+- `TIMESTAMPTZ` with `DEFAULT NOW()` for `created_at`
+- `BIGSERIAL` primary key
+- Parameter placeholders: `$1`, `$2`, …
 
 ## MySQL
 
 - `JSON` type for JSON columns
-- Standard B-tree indexes on structured columns
-- `TIMESTAMP` for `created_at`
-
-MySQL 5.7+ supports `JSON` natively. Queries into nested JSON use
-`JSON_EXTRACT` under the hood.
+- B-tree indexes declared inline in `CREATE TABLE`
+- `TIMESTAMP` with `DEFAULT CURRENT_TIMESTAMP` for `created_at`
+- `BIGINT UNSIGNED AUTO_INCREMENT` primary key
+- Table engine: `InnoDB`, charset `utf8mb4`
+- Parameter placeholders: `?`
 
 ## SQLite
 
-- `TEXT` columns for JSON (SQLite stores JSON as strings)
-- `json_extract()` for queries that dig into JSON
-- `DATETIME` for `created_at`
+- `TEXT` for JSON (stored as JSON-encoded strings)
+- B-tree indexes
+- `DATETIME` with `DEFAULT (datetime('now'))` for `created_at`
+- `INTEGER PRIMARY KEY AUTOINCREMENT`
+- Parameter placeholders: `?`
 
 Great for local development, embedded deployments, and tests.
 
-## Auto-Detection
+## Setting the Dialect
 
-If you omit `Dialect`, the GORM adapter inspects `db.Dialector.Name()`
-and picks the right dialect automatically. Setting it explicitly is
-still recommended for clarity.
+The dialect is explicit — there is no auto-detection based on the
+driver. Pass the constant directly in `Config`:
 
 ```go
-audit.New(db, audit.Config{
-    // Dialect auto-detected from GORM connection
+audit.New(sqlDB, audit.Config{
+    Dialect: audit.PostgreSQL, // or audit.MySQL / audit.SQLite
+    // ...
 })
 ```
 
-## Dialect-Specific Queries
+Valid values:
 
-The query builder rewrites JSON filters per dialect:
+```go
+audit.PostgreSQL
+audit.MySQL
+audit.SQLite
+```
 
-| Filter            | PostgreSQL             | MySQL                          | SQLite                          |
-| ----------------- | ---------------------- | ------------------------------ | ------------------------------- |
-| Key equals value  | `new_values @> '{...}'` | `JSON_CONTAINS(new_values, ...)` | `json_extract(new_values,...) = ?` |
-| Key exists        | `new_values ? 'key'`    | `JSON_CONTAINS_PATH(...)`       | `json_extract(new_values,...) IS NOT NULL` |
+## Custom Dialects
 
-Your application code is identical regardless of dialect — just call
-`auditor.Query(ctx, filter)`.
+You can register a custom dialect to support Aurora, AlloyDB,
+ClickHouse, or any other database. See the
+[Dialect reference](/docs/api-reference/dialect) for the interface and
+registration call.
+
+## Record Shape
+
+The stored record shape is identical across dialects — same columns,
+same JSON structure, same index intent. You can migrate an audit
+database from SQLite to PostgreSQL by copying rows and re-parsing the
+JSON text into `JSONB`.

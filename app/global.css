@@ -1,11 +1,25 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+@source '../node_modules/fumadocs-ui/dist/**/*.js';
+@source '../app/**/*.{ts,tsx}';
+@source '../content/**/*.{md,mdx}';
+@source '../mdx-components.tsx';
 
 :root {
   --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  /* collapse the 1fr gutters on either side of the docs layout so the
+     sidebar sits flush to the left viewport edge and the TOC flush right */
+  --fd-layout-width: 100vw;
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+/* Align desktop sidebar content to the start so it anchors to the
+   viewport's left edge rather than the right edge of its grid cell. */
+#nd-docs-layout > aside {
+  align-items: flex-start;
 }
