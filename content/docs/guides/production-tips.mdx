@@ -1,0 +1,58 @@
+---
+title: Production Tips & Best Practices
+description: Keep audit logs fast, small, and tamper-resistant at scale.
+---
+
+Go Audit writes one `INSERT` per CRUD. For most apps that's fine. At
+scale there are a few things worth doing.
+
+## Table Partitioning
+
+For large datasets, partition `audit_logs` by `created_at`:
+
+```sql
+-- PostgreSQL declarative partitioning
+CREATE TABLE audit_logs_2026_q2 PARTITION OF audit_logs
+FOR VALUES FROM ('2026-04-01') TO ('2026-07-01');
+```
+
+Drop old partitions instead of running `DELETE` at scale.
+
+## Retention Policy
+
+Regulations often cap how long you can retain certain audit data. A
+daily cron that truncates partitions beyond your retention window is
+cheap and fast.
+
+```sql
+-- Drop the oldest partition
+DROP TABLE audit_logs_2023_q1;
+```
+
+## Performance
+
+- **Indexes.** The default indexes cover entity, user, transaction,
+  and time range queries. Add a GIN index on `new_values` in
+  PostgreSQL for JSON key queries.
+- **Async writing.** For very high throughput, buffer audit rows and
+  flush in batches. Trade-off: small risk of losing audit rows on
+  crash.
+- **Connection pooling.** Use a dedicated connection pool for audit
+  writes to avoid starving your main pool.
+
+## Monitoring
+
+- Row count growth per day (sudden spike = bug or abuse).
+- Average `INSERT` latency per dialect.
+- Redaction failures (malformed bodies, encoding errors).
+
+## Security
+
+- **Restrict writes.** Only the app's DB user should be able to
+  `INSERT` into `audit_logs`. Humans and support tools should have
+  `SELECT` only.
+- **Tamper-evidence.** For high-stakes audit trails, chain rows with
+  a rolling hash column (`prev_hash`, `row_hash`) so any tampering is
+  detectable.
+- **Separate credentials.** If possible, run audit writes with a DB
+  user whose grants are narrower than your main app user's.

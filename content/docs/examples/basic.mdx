@@ -1,0 +1,90 @@
+---
+title: Basic Example
+description: GORM + PostgreSQL, data audit only.
+---
+
+This example demonstrates the simplest possible Go Audit setup: GORM
+connected to PostgreSQL with data change auditing enabled.
+
+## Complete Code
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/gopackx/go-audit"
+    auditgorm "github.com/gopackx/go-audit/adapters/gorm"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
+)
+
+type Product struct {
+    ID    uint `gorm:"primaryKey"`
+    Name  string
+    Price int
+}
+
+func main() {
+    dsn := "host=localhost user=postgres password=postgres dbname=shop port=5432 sslmode=disable"
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    auditor := audit.New(db, audit.Config{
+        Dialect: audit.PostgreSQL,
+        UserFunc: func(ctx context.Context) (string, string) {
+            if u, ok := ctx.Value("user_id").(string); ok {
+                return u, "user"
+            }
+            return "system", "system"
+        },
+    })
+
+    if err := db.Use(auditgorm.Plugin(auditor)); err != nil {
+        log.Fatal(err)
+    }
+
+    if err := auditor.AutoMigrate(); err != nil {
+        log.Fatal(err)
+    }
+    if err := db.AutoMigrate(&Product{}); err != nil {
+        log.Fatal(err)
+    }
+
+    ctx := context.WithValue(context.Background(), "user_id", "user-42")
+    tx := db.WithContext(ctx)
+
+    p := Product{Name: "Keyboard", Price: 150}
+    tx.Create(&p)
+    tx.Model(&p).Update("Price", 129)
+    tx.Delete(&p)
+
+    logs, _ := auditor.Query(ctx, audit.DataFilter{EntityType: "products"})
+    for _, l := range logs {
+        fmt.Printf("[%s] %s#%s by %s\n", l.Action, l.EntityType, l.EntityID, l.UserID)
+    }
+}
+```
+
+## Output
+
+```
+[create] products#1 by user-42
+[update] products#1 by user-42
+[delete] products#1 by user-42
+```
+
+Inspect the `audit_logs` table directly and you'll see each row's
+`old_values` and `new_values` populated correctly — the `update` row
+only contains the `Price` field because that's all that changed.
+
+## Next
+
+- Add [API call logging](/docs/examples/api-logging)
+- Use [multiple databases](/docs/examples/multi-database)
+- See the [full example](/docs/examples/full-example)

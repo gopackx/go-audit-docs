@@ -1,0 +1,55 @@
+---
+title: Coming from Laravel
+description: Map laravel-auditing concepts to Go Audit.
+---
+
+If you've used [`owen-it/laravel-auditing`](https://github.com/owen-it/laravel-auditing),
+the mental model carries over directly. Here's the mapping.
+
+## Comparison Table
+
+| Laravel (`laravel-auditing`)     | Go Audit                              |
+| -------------------------------- | ------------------------------------- |
+| `use Auditable` trait on model   | `db.Use(auditgorm.Plugin(auditor))`   |
+| `$model->audits()` relation      | `auditor.Query(ctx, filter)`          |
+| `config/audit.php`               | `audit.Config{}` passed at init        |
+| `Audit::$exclude`                | `DataAudit.ExcludeFields`             |
+| `getAuditExclude()`              | `DataAudit.ExcludeEntities`           |
+| `Audit::getAuditUser()`          | `Config.UserFunc(ctx)`                |
+| `Audit::$auditable = ['create']` | Applied on all actions; filter on read |
+
+## Key Differences
+
+### Model-centric vs Plugin-centric
+
+Laravel auditing works at the **model** level — each Eloquent model
+opts in via a trait. Go Audit works at the **connection** level —
+register the plugin once and every model is covered.
+
+This is usually what you want: new models are audited automatically,
+no trait to remember.
+
+### Diff Scope
+
+`laravel-auditing` stores `old_values` and `new_values` as full field
+maps. Go Audit only stores the **changed** fields, which keeps the
+table small on wide updates.
+
+### API Call Logging
+
+Laravel has no built-in equivalent — API call logging typically lives
+in a separate package. Go Audit bundles it with matching schema and
+transaction correlation.
+
+### Transaction Correlation
+
+`laravel-auditing` doesn't ship with cross-table transaction linking.
+Go Audit's `transaction_id` binds data changes *and* API calls under
+one ID so you can reconstruct an entire business transaction.
+
+### User Attribution
+
+Laravel pulls the user from the auth guard by default. Go Audit uses a
+`UserFunc(ctx)` callback so you can integrate with whatever pattern
+your app uses for request context (middleware, JWT claims, tenant
+context, etc.).

@@ -1,0 +1,79 @@
+---
+title: API Call Logging
+description: Track third-party HTTP calls alongside data changes.
+---
+
+API call logging records outbound requests to services like payment
+gateways, shipping APIs, and identity providers. Each log entry captures
+the endpoint, headers, body, response, duration, and status.
+
+## Setup
+
+Enable it in the auditor config:
+
+```go
+auditor := audit.New(db, audit.Config{
+    Dialect: audit.PostgreSQL,
+    APIAudit: audit.APIAuditConfig{
+        Enabled:        true,
+        RedactHeaders:  []string{"Authorization", "X-API-Key"},
+        RedactBodyFields: []string{"password", "card_number", "cvv"},
+        MaxBodySize:    64 * 1024, // 64 KB
+    },
+})
+```
+
+Then run `auditor.AutoMigrate()` — it creates the `audit_api_logs`
+table.
+
+## Recording an API Call
+
+```go
+start := time.Now()
+resp, err := httpClient.Do(req)
+duration := time.Since(start)
+
+_ = auditor.API().Record(ctx, audit.APIEntry{
+    Service:        "bca",
+    Endpoint:       "/v1/transfer",
+    Method:         http.MethodPost,
+    StatusCode:     resp.StatusCode,
+    RequestHeaders: toMap(req.Header),
+    RequestBody:    reqBody,
+    ResponseBody:   respBody,
+    DurationMs:     int(duration.Milliseconds()),
+})
+```
+
+## Auto Redaction
+
+Any header in `RedactHeaders` is written as `"[REDACTED]"`. Any body
+field (nested or top-level) in `RedactBodyFields` is likewise masked.
+The redaction applies to request **and** response bodies.
+
+```json
+{
+  "request_headers": { "Authorization": "[REDACTED]", "Content-Type": "application/json" },
+  "request_body":   { "card_number": "[REDACTED]", "amount": 100000 }
+}
+```
+
+## Body Truncation
+
+Bodies larger than `MaxBodySize` are truncated. The stored record gets
+a `"_truncated": true` marker so you can distinguish truncated payloads
+from genuinely short ones.
+
+## Linking to Data Changes
+
+Pass a transaction ID through the context and Go Audit will stamp it on
+both data audit rows *and* API call rows:
+
+```go
+txID := audit.NewTransactionID()
+ctx = audit.WithTransactionID(ctx, txID)
+
+// all data + API logs in this context now share txID
+```
+
+Query the full story with [`QueryByTransaction`](/docs/features/transaction-correlation).

@@ -1,0 +1,54 @@
+---
+title: Query & Filters
+description: Cross-table queries and shared pagination semantics.
+---
+
+## `Auditor.QueryByTransaction(ctx, txID) → (*TransactionLog, error)`
+
+Fetches all data audit rows and API call rows sharing a
+`transaction_id`.
+
+```go
+tx, err := auditor.QueryByTransaction(ctx, "txn-1a2b3c4d")
+// tx.DataLogs  []AuditLog
+// tx.APILogs   []AuditAPILog
+```
+
+## `audit.TransactionLog`
+
+```go
+type TransactionLog struct {
+    TransactionID string
+    DataLogs      []AuditLog
+    APILogs       []AuditAPILog
+}
+```
+
+Use this in UIs that show a "transaction timeline" or in support tools
+that need to reconstruct what happened during a single user action.
+
+## Pagination
+
+Every filter type exposes `Limit` and `Offset`:
+
+```go
+page1, _ := auditor.Query(ctx, audit.DataFilter{Limit: 25, Offset: 0})
+page2, _ := auditor.Query(ctx, audit.DataFilter{Limit: 25, Offset: 25})
+```
+
+For very large tables, prefer keyset pagination against `created_at`
+(filter by `DateTo` using the last row's timestamp) over offset
+pagination.
+
+## Sorting
+
+All queries return results ordered by `created_at DESC` by default.
+Stable ordering is guaranteed by the secondary `id` column.
+
+## Helpers
+
+```go
+audit.NewTransactionID() string           // generates a unique ID
+audit.WithTransactionID(ctx, id) context  // stamps the ID into ctx
+audit.TransactionIDFrom(ctx) (string, bool)
+```

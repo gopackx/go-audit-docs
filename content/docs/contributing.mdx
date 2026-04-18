@@ -1,0 +1,66 @@
+---
+title: Contributing
+description: How to build, test, and contribute to Go Audit.
+---
+
+Contributions are welcome. Bug reports, feature ideas, and pull
+requests all help.
+
+## Development Setup
+
+```bash
+git clone https://github.com/gopackx/go-audit
+cd go-audit
+go mod download
+```
+
+## Running Tests
+
+The core tests run against SQLite in-memory (no setup required).
+Dialect tests use Docker for PostgreSQL and MySQL:
+
+```bash
+docker compose up -d          # starts pg + mysql
+go test ./...
+```
+
+Run only the SQLite tests:
+
+```bash
+go test -tags=sqlite ./...
+```
+
+## Adding a New Adapter
+
+1. Create a new package under `adapters/<orm>`.
+2. Implement the adapter's `Register(db, auditor)` entry point.
+3. Hook into the ORM's lifecycle (callbacks, hooks, interceptors).
+4. Reuse the core `Auditor` for all writes — don't duplicate diff
+   logic.
+5. Add a full test suite that mirrors the GORM adapter's test layout.
+
+See `adapters/gorm` for the reference implementation.
+
+## Code Style
+
+- `gofmt` + `goimports`.
+- `golangci-lint run` passes with the repo's config.
+- Conventional commit messages: `feat: ...`, `fix: ...`, `docs: ...`,
+  `chore: ...`.
+
+## Pull Request Process
+
+1. Fork, branch from `main`.
+2. Commit with conventional messages.
+3. Push and open a PR. CI must be green.
+4. A maintainer will review — please address comments and squash as
+   requested.
+
+## Reporting Issues
+
+Use the GitHub issue tracker. Include:
+
+- Go version and OS
+- ORM + database + dialect
+- A minimal reproduction if possible
+- What you expected vs what happened

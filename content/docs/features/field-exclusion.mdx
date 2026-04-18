@@ -1,0 +1,54 @@
+---
+title: Field Exclusion
+description: Exclude sensitive fields like password and token from being audited.
+---
+
+Some fields shouldn't appear in audit logs — passwords, refresh tokens,
+card numbers. Go Audit has two levers: per-field exclusion and
+per-entity exclusion.
+
+## Per-Field Exclusion
+
+```go
+DataAudit: audit.DataAuditConfig{
+    ExcludeFields: []string{"password", "token", "api_key"},
+}
+```
+
+Matching fields are recorded as `"[EXCLUDED]"` in both `old_values` and
+`new_values`. The audit record shows that the field changed without
+leaking the value.
+
+**Matching rules**
+
+- Case-insensitive.
+- Matched against the struct's `json` tag first, then the field name.
+- Nested struct fields are also checked.
+
+## Per-Entity Exclusion
+
+To skip an entity entirely (no audit record at all):
+
+```go
+DataAudit: audit.DataAuditConfig{
+    ExcludeEntities: []string{"sessions", "cache_entries"},
+}
+```
+
+Useful for high-churn tables where audit volume would outweigh the
+signal.
+
+## Comparison
+
+| Behavior           | ExcludeFields       | ExcludeEntities |
+| ------------------ | ------------------- | --------------- |
+| Record written     | Yes                 | No              |
+| Value stored       | `"[EXCLUDED]"`      | N/A             |
+| Change detectable  | Yes                 | No              |
+
+## Dynamic Exclusion
+
+If exclusion needs to depend on context (per-tenant policy, for
+example), layer it at the ORM level by using a custom session that
+doesn't go through the audit plugin — or run two `Auditor` instances
+with different configs.

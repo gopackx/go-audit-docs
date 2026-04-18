@@ -1,0 +1,59 @@
+---
+title: Auto Redaction
+description: Sensitive fields and headers are masked before storage.
+---
+
+Go Audit masks sensitive data before it's ever written to the audit
+table. There are two redaction paths: one for data audit records and
+one for API call logs.
+
+## Data Audit Redaction
+
+Fields listed in `DataAudit.ExcludeFields` are detected as changed but
+their values are replaced with `"[EXCLUDED]"`:
+
+```go
+DataAudit: audit.DataAuditConfig{
+    ExcludeFields: []string{"password", "token", "api_key"},
+}
+```
+
+Stored audit record:
+
+```json
+{
+  "old_values": { "password": "[EXCLUDED]" },
+  "new_values": { "password": "[EXCLUDED]" }
+}
+```
+
+The field name is matched against the struct's JSON tag (or field
+name, case-insensitive) and works for nested structs too.
+
+## API Call Redaction
+
+For outbound HTTP calls, two knobs cover the common cases:
+
+```go
+APIAudit: audit.APIAuditConfig{
+    RedactHeaders:    []string{"Authorization", "Cookie", "X-API-Key"},
+    RedactBodyFields: []string{"password", "card_number", "cvv"},
+}
+```
+
+- `RedactHeaders` masks matching request/response headers.
+- `RedactBodyFields` walks JSON request and response bodies, masking
+  any matching key at any depth.
+
+## Why `"[REDACTED]"` Instead of Omitting?
+
+Keeping the key with a masked value preserves the diff signal — you can
+tell that a secret **changed** without knowing *what* it changed to.
+This matters for audit trails: a rotated API key should leave a record
+that rotation happened.
+
+## Compliance
+
+This design covers typical PCI/HIPAA requirements for not persisting
+raw secrets. Verify with your own security review for your specific
+regulatory obligations.

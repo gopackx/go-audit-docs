@@ -1,0 +1,109 @@
+---
+title: Quick Start
+description: A complete runnable example with GORM and PostgreSQL.
+---
+
+This example wires Go Audit into a GORM + PostgreSQL app and shows audit
+logs appearing automatically after CRUD operations.
+
+## The Full Program
+
+```go
+package main
+
+import (
+    "context"
+    "fmt"
+    "log"
+
+    "github.com/gopackx/go-audit"
+    auditgorm "github.com/gopackx/go-audit/adapters/gorm"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
+)
+
+type User struct {
+    ID    uint   `gorm:"primaryKey"`
+    Name  string
+    Email string
+}
+
+func main() {
+    dsn := "host=localhost user=postgres password=postgres dbname=demo port=5432 sslmode=disable"
+    db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // 1. Configure the auditor.
+    auditor := audit.New(db, audit.Config{
+        Dialect: audit.PostgreSQL,
+        UserFunc: func(ctx context.Context) (string, string) {
+            if uid, ok := ctx.Value("user_id").(string); ok {
+                return uid, "user"
+            }
+            return "system", "system"
+        },
+        DataAudit: audit.DataAuditConfig{
+            Enabled:       true,
+            ExcludeFields: []string{"password", "token"},
+        },
+    })
+
+    // 2. Register the GORM plugin.
+    if err := db.Use(auditgorm.Plugin(auditor)); err != nil {
+        log.Fatal(err)
+    }
+
+    // 3. Create audit tables.
+    if err := auditor.AutoMigrate(); err != nil {
+        log.Fatal(err)
+    }
+    if err := db.AutoMigrate(&User{}); err != nil {
+        log.Fatal(err)
+    }
+
+    ctx := context.WithValue(context.Background(), "user_id", "admin-1")
+    tx := db.WithContext(ctx)
+
+    // 4. Perform CRUD — audit logs appear automatically.
+    user := User{Name: "Ada Lovelace", Email: "ada@example.com"}
+    tx.Create(&user)
+
+    tx.Model(&user).Update("Email", "ada.l@example.com")
+
+    tx.Delete(&user)
+
+    // 5. Query the audit trail.
+    logs, _ := auditor.Query(ctx, audit.DataFilter{EntityType: "users"})
+    for _, l := range logs {
+        fmt.Printf("%s %s by %s\n", l.Action, l.EntityID, l.UserID)
+    }
+}
+```
+
+## Step-by-Step Walkthrough
+
+1. **Configure the auditor.** Pass the DB, dialect, a `UserFunc` for
+   context-aware attribution, and any fields you want excluded.
+2. **Register the GORM plugin.** `db.Use(auditgorm.Plugin(auditor))`
+   installs all lifecycle callbacks.
+3. **Run auto-migration.** `auditor.AutoMigrate()` creates the
+   `audit_logs` (and optionally `audit_api_logs`) tables.
+4. **Perform CRUD normally.** Every `Create`, `Save`, `Updates`, and
+   `Delete` is captured automatically. Use `db.WithContext(ctx)` so the
+   `UserFunc` receives the caller's context.
+
+## Verify It Works
+
+```
+create 1 by admin-1
+update 1 by admin-1
+delete 1 by admin-1
+```
+
+## Next Steps
+
+- Add [API call logging](/docs/features/api-logging)
+- Explore [other adapters](/docs/adapters/overview)
+- Browse more [examples](/docs/examples/basic)

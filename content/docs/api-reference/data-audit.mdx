@@ -1,0 +1,68 @@
+---
+title: Data Audit API
+description: Record and query data change events.
+---
+
+## `Auditor.Query(ctx, filter) → ([]AuditLog, error)`
+
+Fetches data audit records matching a filter. Default order is
+`created_at DESC`.
+
+```go
+logs, err := auditor.Query(ctx, audit.DataFilter{
+    EntityType: "users",
+    Limit:      50,
+})
+```
+
+## `audit.DataFilter`
+
+```go
+type DataFilter struct {
+    EntityType string
+    EntityID   string
+    Action     string    // ActionCreate, ActionUpdate, ActionDelete
+    UserID     string
+    DateFrom   time.Time
+    DateTo     time.Time
+    Limit      int
+    Offset     int
+}
+```
+
+All fields are optional. Zero values are ignored by the query builder.
+
+## `audit.AuditLog`
+
+```go
+type AuditLog struct {
+    ID            uint64         `json:"id"`
+    EntityType    string         `json:"entity_type"`
+    EntityID      string         `json:"entity_id"`
+    Action        string         `json:"action"`
+    OldValues     map[string]any `json:"old_values"`
+    NewValues     map[string]any `json:"new_values"`
+    UserID        string         `json:"user_id"`
+    UserType      string         `json:"user_type"`
+    Metadata      map[string]any `json:"metadata"`
+    TransactionID string         `json:"transaction_id"`
+    CreatedAt    time.Time      `json:"created_at"`
+}
+```
+
+## `Auditor.RecordManual(ctx, entry) → error`
+
+Escape hatch for code paths that bypass ORM hooks (raw SQL, external
+systems). Accepts a fully-formed `AuditEntry` and writes it as-is.
+
+```go
+_ = auditor.RecordManual(ctx, audit.AuditEntry{
+    EntityType: "ledger_entries",
+    EntityID:   "le-42",
+    Action:     audit.ActionCreate,
+    NewValues:  map[string]any{"amount": 500},
+})
+```
+
+Prefer the ORM adapters — use `RecordManual` only when no hook can
+observe the change.

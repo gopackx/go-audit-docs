@@ -1,0 +1,59 @@
+---
+title: Bun Adapter
+description: Use Go Audit with the Bun ORM.
+---
+
+The Bun adapter hooks into Bun's query lifecycle to capture inserts,
+updates, and deletes.
+
+## Installation
+
+```bash
+go get github.com/gopackx/go-audit/adapters/bun
+```
+
+## Setup
+
+```go
+import (
+    "github.com/gopackx/go-audit"
+    auditbun "github.com/gopackx/go-audit/adapters/bun"
+    "github.com/uptrace/bun"
+)
+
+auditor := audit.New(bunDB, audit.Config{
+    Dialect: audit.PostgreSQL,
+    UserFunc: func(ctx context.Context) (string, string) {
+        return "user-123", "user"
+    },
+})
+
+auditbun.Register(bunDB, auditor)
+
+if err := auditor.AutoMigrate(); err != nil {
+    return err
+}
+```
+
+## How It Works
+
+The adapter attaches four hooks to the `bun.DB`:
+
+- `BeforeUpdateHook` — captures the current row state
+- `AfterUpdateHook` — diffs old vs new, writes the audit row
+- `AfterInsertHook` — records the created values
+- `AfterDeleteHook` — records the deleted values
+
+## Supported Operations
+
+- `db.NewInsert()`
+- `db.NewUpdate()`
+- `db.NewDelete()`
+
+Batch operations are grouped under one `transaction_id`.
+
+## Caveats
+
+- Raw SQL executed through `db.ExecContext` bypasses the hooks.
+- Bun's `ForceDelete()` is recorded as a `delete`; soft-delete flows
+  are recorded when the update produces a non-zero `deleted_at`.

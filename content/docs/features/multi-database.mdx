@@ -1,0 +1,58 @@
+---
+title: Multi-Database Support
+description: First-class PostgreSQL, MySQL, and SQLite with dialect-aware storage and querying.
+---
+
+Go Audit ships with three dialect implementations. Each generates
+schema, stores JSON, and queries in the way that is most efficient for
+the database.
+
+## PostgreSQL
+
+- `JSONB` for `old_values`, `new_values`, `metadata`
+- `GIN` indexes on JSON columns for fast key/value lookups
+- `TIMESTAMPTZ` for `created_at`
+
+PostgreSQL is the default and performs best for ad-hoc queries against
+JSON-valued fields.
+
+## MySQL
+
+- `JSON` type for JSON columns
+- Standard B-tree indexes on structured columns
+- `TIMESTAMP` for `created_at`
+
+MySQL 5.7+ supports `JSON` natively. Queries into nested JSON use
+`JSON_EXTRACT` under the hood.
+
+## SQLite
+
+- `TEXT` columns for JSON (SQLite stores JSON as strings)
+- `json_extract()` for queries that dig into JSON
+- `DATETIME` for `created_at`
+
+Great for local development, embedded deployments, and tests.
+
+## Auto-Detection
+
+If you omit `Dialect`, the GORM adapter inspects `db.Dialector.Name()`
+and picks the right dialect automatically. Setting it explicitly is
+still recommended for clarity.
+
+```go
+audit.New(db, audit.Config{
+    // Dialect auto-detected from GORM connection
+})
+```
+
+## Dialect-Specific Queries
+
+The query builder rewrites JSON filters per dialect:
+
+| Filter            | PostgreSQL             | MySQL                          | SQLite                          |
+| ----------------- | ---------------------- | ------------------------------ | ------------------------------- |
+| Key equals value  | `new_values @> '{...}'` | `JSON_CONTAINS(new_values, ...)` | `json_extract(new_values,...) = ?` |
+| Key exists        | `new_values ? 'key'`    | `JSON_CONTAINS_PATH(...)`       | `json_extract(new_values,...) IS NOT NULL` |
+
+Your application code is identical regardless of dialect — just call
+`auditor.Query(ctx, filter)`.

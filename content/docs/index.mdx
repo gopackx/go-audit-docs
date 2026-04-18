@@ -1,0 +1,54 @@
+---
+title: Go Audit
+description: Automatic audit trail and API call logging for Go applications.
+---
+
+Go Audit provides automatic audit trail and API call logging for Go
+applications. Register a plugin with your ORM, and every create, update,
+and delete is tracked — who changed what, when, from what value to what
+value.
+
+## Key Features
+
+- **ORM Auto-Hooks** — GORM, Bun, Ent (zero manual code)
+- **Auto Diff** — old vs new values, only changed fields stored
+- **API Call Logging** — track third-party requests/responses
+- **Multi-Database** — PostgreSQL, MySQL, SQLite
+- **Auto Redaction** — sensitive data protection
+- **Transaction Correlation** — link data changes + API calls
+- **Query Builder** — filter by entity, user, action, date range
+
+## Quick Navigation
+
+- [Getting Started](/docs/getting-started/installation) — install and set up your first audit trail
+- [Features](/docs/features/auto-diff) — explore every capability
+- [Adapters](/docs/adapters/overview) — ORM integrations (GORM, Bun, Ent)
+- [API Reference](/docs/api-reference/core) — full API surface
+- [Examples](/docs/examples/basic) — runnable end-to-end samples
+
+## Install
+
+```bash
+go get github.com/gopackx/go-audit
+```
+
+## Minimal Example
+
+```go
+import (
+    "github.com/gopackx/go-audit"
+    auditgorm "github.com/gopackx/go-audit/adapters/gorm"
+)
+
+auditor := audit.New(db, audit.Config{
+    Dialect: audit.PostgreSQL,
+    UserFunc: func(ctx context.Context) (string, string) {
+        return "user-123", "user"
+    },
+})
+
+db.Use(auditgorm.Plugin(auditor))
+```
+
+That's it. Every create, update, and delete through GORM is now tracked
+in the `audit_logs` table automatically.

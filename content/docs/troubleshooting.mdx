@@ -1,0 +1,64 @@
+---
+title: Troubleshooting
+description: Common issues and how to fix them.
+---
+
+## Audit logs not being created
+
+Checklist:
+
+- **Plugin registered?** `db.Use(auditgorm.Plugin(auditor))` must be
+  called **before** any CRUD.
+- **Migrated?** `auditor.AutoMigrate()` must have run at least once so
+  the `audit_logs` table exists.
+- **Entity excluded?** Verify the entity isn't in `ExcludeEntities`.
+- **Context passed through?** Use `db.WithContext(ctx)` — your
+  `UserFunc` needs the context to extract user info.
+- **Hooks not skipped?** `db.Session(&gorm.Session{SkipHooks: true})`
+  disables audit writes. Make sure you're not inadvertently using this.
+
+## `old_values` is always null on update
+
+- The `BeforeUpdate` hook didn't run. This is almost always caused by
+  `SkipHooks: true` somewhere in the session chain.
+- If you're using `Updates(map[string]any{...})` make sure at least one
+  primary key column is present in the WHERE so the plugin can fetch
+  the old row.
+
+## "table audit_logs does not exist"
+
+Call `auditor.AutoMigrate()` once at startup, before any CRUD. It's
+idempotent — safe to call repeatedly.
+
+## JSON fields stored as empty `{}`
+
+- Make sure your struct fields are **exported** (capitalized).
+- Add `json:"field_name"` tags so the field is picked up during diff
+  serialization.
+
+## Redaction not applied
+
+- Check the field name casing. Matching is case-insensitive against
+  both `json` tags and field names.
+- For API calls, confirm the entry is actually going through
+  `Auditor.API().Record(...)` — a direct `INSERT` bypasses redaction.
+
+## Performance degradation after enabling Go Audit
+
+- Each update does one extra `SELECT` (for old values) plus one
+  `INSERT`. If your update volume is extreme, see
+  [Production Tips](/docs/guides/production-tips) for async batching.
+- Ensure the audit table indexes are present. Missing indexes on
+  `entity_type`/`entity_id` cause slow reads, not writes, but they're
+  the most common culprit when "audit table queries are slow".
+
+## `transaction_id` is empty
+
+You need to stamp the context:
+
+```go
+ctx = audit.WithTransactionID(ctx, audit.NewTransactionID())
+```
+
+Every write on this `ctx` will carry the ID. Without it, records get
+an empty string.

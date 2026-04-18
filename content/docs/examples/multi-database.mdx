@@ -1,0 +1,52 @@
+---
+title: Multi-Database Setup
+description: Run Go Audit against PostgreSQL, MySQL, and SQLite.
+---
+
+Go Audit works across dialects. The application code is identical — only
+the DSN and `Dialect` change.
+
+## PostgreSQL
+
+```go
+db, _ := gorm.Open(postgres.Open(pgDSN), &gorm.Config{})
+auditor := audit.New(db, audit.Config{Dialect: audit.PostgreSQL})
+```
+
+## MySQL
+
+```go
+db, _ := gorm.Open(mysql.Open(mysqlDSN), &gorm.Config{})
+auditor := audit.New(db, audit.Config{Dialect: audit.MySQL})
+```
+
+## SQLite
+
+```go
+db, _ := gorm.Open(sqlite.Open("audit.db"), &gorm.Config{})
+auditor := audit.New(db, audit.Config{Dialect: audit.SQLite})
+```
+
+## Auto-Detect
+
+Omit `Dialect` and the adapter reads it from `db.Dialector.Name()`:
+
+```go
+auditor := audit.New(db, audit.Config{
+    // Dialect auto-detected
+    UserFunc: userFromContext,
+})
+```
+
+## Switching Dialects
+
+The stored record shape is identical across dialects, so you can
+export from one and import into another. The only caveat: JSON
+stored as `TEXT` in SQLite is still valid JSON — re-parse on
+migration if needed.
+
+## Dev vs Prod
+
+A common pattern: SQLite for local dev and tests, PostgreSQL or MySQL
+in production. Go Audit's dialect abstraction means you don't need
+conditional code — just swap the driver.

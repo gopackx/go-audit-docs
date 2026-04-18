@@ -1,0 +1,39 @@
+---
+title: Custom Table Names
+description: Rename audit tables to match your project's naming conventions.
+---
+
+The default tables are `audit_logs` (data changes) and `audit_api_logs`
+(API calls). You can override either independently.
+
+## Configuration
+
+```go
+auditor := audit.New(db, audit.Config{
+    DataAudit: audit.DataAuditConfig{
+        Table: "app_audit_events",
+    },
+    APIAudit: audit.APIAuditConfig{
+        Table: "app_outbound_calls",
+    },
+})
+```
+
+`AutoMigrate()` will create the tables under your chosen names, and all
+queries (`Query`, `API().Query`, `QueryByTransaction`) automatically use
+the configured names.
+
+## Use Cases
+
+- **Multi-tenant schemas.** Prefix tables with a tenant identifier:
+  `tenant42_audit_logs`.
+- **Naming conventions.** Match an existing project style (e.g.
+  singular vs plural).
+- **Parallel installs.** Run two `Auditor` instances side-by-side with
+  different tables for different subsystems.
+
+## Constraints
+
+- Table names must be valid identifiers for your target dialect.
+- Changing the name after records exist requires a migration — Go Audit
+  does not rename automatically.

@@ -1,0 +1,47 @@
+---
+title: Adapter Overview
+description: Compare Go Audit's ORM adapters and choose the right one.
+---
+
+Go Audit supports ORMs that expose lifecycle hooks — that's the primary
+requirement for automatic tracking. Three adapters ship with the
+project.
+
+## Comparison Table
+
+| ORM  | Hook Mechanism        | Auto Old Values | Batch Support |
+| ---- | --------------------- | --------------- | ------------- |
+| GORM | Callbacks (plugin)    | Yes             | Yes           |
+| Bun  | Query hooks           | Yes             | Yes           |
+| Ent  | Mutation interceptors | Yes             | Yes           |
+
+All three deliver the same audit record shape; the integration plumbing
+is what differs.
+
+## Why No `sqlx` or `pgx`?
+
+Thin SQL wrappers like `sqlx`, `pgx`, and `database/sql` don't have a
+lifecycle model for create/update/delete — they just execute SQL. Go
+Audit needs a hook point to capture old values *before* an update and
+compare them *after*, which these libraries don't provide.
+
+If you need auditing for a raw-SQL app, you have two options:
+
+1. Wrap your writes in an explicit recording helper that calls
+   `auditor.RecordManual(...)` (manual audit).
+2. Migrate the write path to a supported ORM.
+
+## Choosing an Adapter
+
+- **GORM** — most popular, easiest setup, largest plugin ecosystem.
+  Default choice for new projects.
+- **Bun** — lightweight, explicit query builder feel. Great if you
+  prefer SQL-ish code with strong typing.
+- **Ent** — schema-first code generation with rich graph traversal.
+  Pick this if you already build models via `ent codegen`.
+
+## Links
+
+- [GORM adapter](/docs/adapters/gorm)
+- [Bun adapter](/docs/adapters/bun)
+- [Ent adapter](/docs/adapters/ent)

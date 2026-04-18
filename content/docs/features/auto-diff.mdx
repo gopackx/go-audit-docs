@@ -1,0 +1,64 @@
+---
+title: Auto Diff
+description: How Go Audit captures old vs new values automatically.
+---
+
+Go Audit computes the difference between a record's state before and
+after an update, and stores **only the fields that changed**. You don't
+write any diff code — it happens inside the ORM hooks.
+
+## How It Works
+
+1. The `BeforeUpdate` hook fires. Go Audit issues a `SELECT` for the
+   current row and captures it as the "old" snapshot.
+2. The ORM performs the update.
+3. The `AfterUpdate` hook fires. Go Audit compares the old snapshot
+   with the new struct field-by-field.
+4. Only the fields whose values changed are written into `old_values`
+   and `new_values`.
+
+## Example Output
+
+Given an update that only changes `email`, the audit record looks like:
+
+```json
+{
+  "action": "update",
+  "old_values": { "email": "old@example.com" },
+  "new_values": { "email": "new@example.com" }
+}
+```
+
+`name`, `created_at`, and every other unchanged field are omitted. The
+payload stays small even for wide tables.
+
+## Nested Structs
+
+Embedded and nested structs are walked recursively. A change to a
+single leaf field produces a diff that only contains that path:
+
+```json
+{
+  "old_values": { "address": { "city": "Jakarta" } },
+  "new_values": { "address": { "city": "Bandung" } }
+}
+```
+
+## Excluded Fields
+
+Fields listed in `DataAudit.ExcludeFields` are detected as changed (so
+you can see *that* they changed) but the value is replaced with
+`"[EXCLUDED]"`:
+
+```json
+{
+  "old_values": { "password": "[EXCLUDED]" },
+  "new_values": { "password": "[EXCLUDED]" }
+}
+```
+
+## When Diff Is Skipped
+
+- No fields changed — no audit record is written.
+- The entity is in `ExcludeEntities` — no record is written.
+- The session has `SkipHooks: true` — hooks don't fire at all.

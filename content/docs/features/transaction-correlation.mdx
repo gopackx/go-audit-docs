@@ -1,0 +1,67 @@
+---
+title: Transaction Correlation
+description: Link related data changes and API calls with a shared transaction ID.
+---
+
+A single user action often causes multiple side effects: a DB write,
+one or more third-party API calls, another DB write. Transaction
+correlation lets you link them all under one ID so you can replay the
+full story later.
+
+## Generating a Transaction ID
+
+```go
+txID := audit.NewTransactionID() // "txn-1a2b3c4d"
+ctx = audit.WithTransactionID(ctx, txID)
+```
+
+Every audit write on that context — data or API — receives the same
+`transaction_id`.
+
+## Full Flow Example
+
+```go
+func Transfer(ctx context.Context, orderID string, amount int) error {
+    ctx = audit.WithTransactionID(ctx, audit.NewTransactionID())
+
+    // 1. Call the payment gateway — logged to audit_api_logs
+    ref, err := bca.Transfer(ctx, amount)
+    if err != nil {
+        return err
+    }
+
+    // 2. Update the order — logged to audit_logs
+    return db.WithContext(ctx).
+        Model(&Order{}).
+        Where("id = ?", orderID).
+        Updates(map[string]any{
+            "payment_ref": ref,
+            "status":      "paid",
+        }).Error
+}
+```
+
+Both the BCA API call row and the order update row carry the same
+`transaction_id`.
+
+## Querying by Transaction
+
+```go
+logs, err := auditor.QueryByTransaction(ctx, txID)
+// logs.DataLogs  []AuditLog
+// logs.APILogs   []AuditAPILog
+```
+
+## Output Shape
+
+```go
+type TransactionLog struct {
+    TransactionID string
+    DataLogs      []AuditLog
+    APILogs       []AuditAPILog
+}
+```
+
+This gives you a single object that reconstructs the full sequence of
+side effects for the transaction — perfect for support tickets,
+post-mortems, and compliance reviews.

@@ -1,0 +1,63 @@
+---
+title: FAQ
+description: Frequently asked questions about Go Audit.
+---
+
+## Does Go Audit work with `sqlx` or raw `database/sql`?
+
+No. Go Audit requires ORM lifecycle hooks to auto-track changes. `sqlx`
+and `database/sql` are thin SQL wrappers without hooks, so there's no
+way to intercept create/update/delete. Use a supported ORM: GORM, Bun,
+or Ent.
+
+## Does Go Audit make HTTP calls?
+
+No. The core package has zero network dependencies. It only writes to
+the database connection you provide. API call logging records calls
+**you** make — Go Audit never originates requests.
+
+## Will audit logs slow down my application?
+
+Minimal impact. Each CRUD adds one `INSERT` to the audit table. The
+diff computation is in-memory and sub-millisecond. For high-throughput
+workloads, see [Production Tips](/docs/guides/production-tips) for
+async writing and batch insert strategies.
+
+## Can I use custom table names?
+
+Yes. Configure via `DataAudit.Table` and `APIAudit.Table`:
+
+```go
+audit.Config{
+    DataAudit: audit.DataAuditConfig{Table: "app_audit"},
+    APIAudit:  audit.APIAuditConfig{Table: "app_api_audit"},
+}
+```
+
+## Does it support soft deletes?
+
+Yes, for GORM with soft delete enabled. The action is recorded as
+`delete` with the soft-deleted record's values in `old_values`.
+
+## How do I audit bulk/batch operations?
+
+Batch operations are automatically grouped under a shared
+`transaction_id`. Each affected record gets its own `audit_logs` entry,
+and you can fetch them all at once with
+`auditor.QueryByTransaction(ctx, txID)`.
+
+## Can I disable auditing for specific tables?
+
+Yes. Add the table name to `ExcludeEntities`:
+
+```go
+DataAudit: audit.DataAuditConfig{
+    ExcludeEntities: []string{"sessions", "cache_entries"},
+}
+```
+
+## What happens to excluded fields?
+
+Fields listed in `ExcludeFields` are stored as `"[EXCLUDED]"` in the
+audit record so you can see that a field changed without exposing the
+value. Passwords, tokens, and secrets are the typical use case.

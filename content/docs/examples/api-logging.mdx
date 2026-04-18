@@ -1,0 +1,118 @@
+---
+title: API Call Logging Example
+description: Track a BCA payment call alongside the order data change.
+---
+
+This example shows a payment flow where a BCA API call and an order
+update are linked via a shared `transaction_id`.
+
+## Complete Code
+
+```go
+package main
+
+import (
+    "bytes"
+    "context"
+    "encoding/json"
+    "io"
+    "net/http"
+    "time"
+
+    "github.com/gopackx/go-audit"
+    auditgorm "github.com/gopackx/go-audit/adapters/gorm"
+    "gorm.io/driver/postgres"
+    "gorm.io/gorm"
+)
+
+type Order struct {
+    ID         uint `gorm:"primaryKey"`
+    Amount     int
+    Status     string
+    PaymentRef string
+}
+
+func main() {
+    db, _ := gorm.Open(postgres.Open("..."), &gorm.Config{})
+
+    auditor := audit.New(db, audit.Config{
+        Dialect: audit.PostgreSQL,
+        UserFunc: func(ctx context.Context) (string, string) {
+            return "user-42", "user"
+        },
+        APIAudit: audit.APIAuditConfig{
+            Enabled:          true,
+            RedactHeaders:    []string{"Authorization"},
+            RedactBodyFields: []string{"card_number", "cvv"},
+            MaxBodySize:      64 * 1024,
+        },
+    })
+
+    _ = db.Use(auditgorm.Plugin(auditor))
+    _ = auditor.AutoMigrate()
+    _ = db.AutoMigrate(&Order{})
+
+    order := Order{Amount: 100000, Status: "pending"}
+    db.Create(&order)
+
+    txID := audit.NewTransactionID()
+    ctx := audit.WithTransactionID(context.Background(), txID)
+    tx := db.WithContext(ctx)
+
+    // Outbound API call to BCA
+    reqBody, _ := json.Marshal(map[string]any{"amount": order.Amount})
+    req, _ := http.NewRequestWithContext(ctx,
+        http.MethodPost,
+        "https://api.bca.co.id/v1/transfer",
+        bytes.NewReader(reqBody),
+    )
+    req.Header.Set("Authorization", "Bearer secret")
+    req.Header.Set("Content-Type", "application/json")
+
+    start := time.Now()
+    resp, err := http.DefaultClient.Do(req)
+    duration := time.Since(start)
+
+    var respPayload map[string]any
+    if resp != nil {
+        body, _ := io.ReadAll(resp.Body)
+        _ = json.Unmarshal(body, &respPayload)
+    }
+
+    _ = auditor.API().Record(ctx, audit.APIEntry{
+        Service:        "bca",
+        Endpoint:       "/v1/transfer",
+        Method:         http.MethodPost,
+        StatusCode:     statusCode(resp),
+        RequestHeaders: headersToMap(req.Header),
+        RequestBody:    map[string]any{"amount": order.Amount},
+        ResponseBody:   respPayload,
+        DurationMs:     int(duration.Milliseconds()),
+        ErrorMessage:   errString(err),
+    })
+
+    // Update the order to reflect the payment outcome
+    ref, _ := respPayload["reference"].(string)
+    tx.Model(&order).Updates(map[string]any{
+        "payment_ref": ref,
+        "status":      "paid",
+    })
+
+    // Fetch the full transaction trail
+    trail, _ := auditor.QueryByTransaction(ctx, txID)
+    _ = trail // has both DataLogs and APILogs
+}
+```
+
+## What You Get
+
+- `audit_logs` has one row for the order update with the new
+  `payment_ref` and `status`.
+- `audit_api_logs` has one row for the BCA call with the redacted
+  `Authorization` header and full response body.
+- Both rows share the same `transaction_id`.
+
+## Next
+
+See the [full example](/docs/examples/full-example) for a multi-step
+flow with several API calls.

@@ -1,0 +1,85 @@
+---
+title: Migrating from Manual Audit
+description: Move from hand-written audit code to Go Audit's ORM hooks.
+---
+
+Many Go projects end up with hand-rolled audit code — a helper like
+`recordAudit(...)` called after every write. It works, but:
+
+- Easy to forget on new code paths.
+- Scattered logic, hard to audit itself.
+- Manual diff computation is error-prone.
+
+Go Audit replaces all of that with ORM-level hooks.
+
+## Step 1 — Install and Register
+
+```bash
+go get github.com/gopackx/go-audit
+go get github.com/gopackx/go-audit/adapters/gorm
+```
+
+```go
+auditor := audit.New(db, audit.Config{
+    Dialect:  audit.PostgreSQL,
+    UserFunc: yourExistingUserExtractor,
+})
+_ = db.Use(auditgorm.Plugin(auditor))
+```
+
+## Step 2 — Map Existing Config
+
+If you had a config like this:
+
+```go
+var auditConfig = struct {
+    ExcludedFields   []string
+    ExcludedEntities []string
+}{
+    ExcludedFields:   []string{"password", "token"},
+    ExcludedEntities: []string{"sessions"},
+}
+```
+
+Port it straight into `DataAuditConfig`:
+
+```go
+DataAudit: audit.DataAuditConfig{
+    ExcludeFields:   auditConfig.ExcludedFields,
+    ExcludeEntities: auditConfig.ExcludedEntities,
+}
+```
+
+## Step 3 — Remove Manual Calls
+
+Delete `recordAudit(...)` calls from your write paths. The ORM plugin
+now captures them automatically.
+
+Keep any `recordAudit` calls that run in code paths *not* touched by
+the ORM (raw SQL, external sources) and convert them to
+`auditor.RecordManual(...)`.
+
+## Step 4 — Migrate the Table
+
+If your existing audit table shape doesn't match Go Audit's, the
+easiest path is:
+
+1. Run `auditor.AutoMigrate()` — creates a new `audit_logs` table.
+2. Write a one-off migration that copies old rows into the new shape
+   (or leave them in place as historical data).
+3. Update your read UI to query the new table.
+
+## Verifying the Cut-Over
+
+Run both systems side-by-side for a day:
+
+- Keep the old `recordAudit(...)` calls.
+- Enable Go Audit's plugin.
+- Compare rows — they should agree.
+- Remove the old calls once you're confident.
+
+## Payoff
+
+- Every code path is audited automatically, including future ones.
+- Diff computation is handled, including nested structs.
+- Transaction correlation gives you cross-system traces for free.

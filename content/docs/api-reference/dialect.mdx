@@ -1,0 +1,49 @@
+---
+title: Dialect Interface
+description: The Dialect abstraction and how to implement a new one.
+---
+
+Dialects encapsulate all database-specific behavior: DDL generation,
+JSON encoding, and JSON querying. Go Audit ships with three
+implementations — PostgreSQL, MySQL, and SQLite.
+
+## The Interface
+
+```go
+type Dialect interface {
+    Name() string
+    CreateDataTable(table string) string   // CREATE TABLE IF NOT EXISTS ...
+    CreateAPITable(table string) string
+    CreateIndexes(table string) []string
+
+    EncodeJSON(v any) (any, error)         // how to pass JSON to the driver
+    DecodeJSON(v any, out any) error
+
+    FilterJSONEquals(col, key string) (clause string, args []any)
+}
+```
+
+Only the pieces that vary between databases live here. High-level query
+logic (pagination, ordering, field mapping) is shared across dialects.
+
+## Built-In Dialects
+
+- `audit.PostgreSQL` — uses `JSONB` + `GIN` indexes; richest query
+  capability.
+- `audit.MySQL` — uses `JSON` column type; B-tree indexes.
+- `audit.SQLite` — stores JSON as `TEXT`; uses `json_extract()`.
+
+## Implementing a Custom Dialect
+
+1. Implement `audit.Dialect` for your database.
+2. Register it via `audit.RegisterDialect("custom", myDialect)`.
+3. Pass the name in `Config{Dialect: "custom"}`.
+
+## When Would You Need This?
+
+- A cloud database variant (Aurora, AlloyDB, Spanner) where the
+  standard dialect falls short.
+- An experimental backend like DuckDB or ClickHouse for analytics-heavy
+  audit consumers.
+
+Open an issue on GitHub if you want your dialect upstreamed.

@@ -1,0 +1,11 @@
+ Tidak dilakukan (butuh hal di luar kode):
+  1. Mobile responsive testing — perlu browser, nggak bisa dari sini.
+  2. Custom syntax highlighting theme — plan bilang "matching" tapi nggak spesifik warna apa; pakai
+  default Fumadocs dulu.
+  3. Logo PNG asset — aku pakai SVG shield + OG dinamis (modern equivalent, nggak perlu file raster).
+  4. Dev server belum diverifikasi jalan — Node 14 kamu blocking; upgrade ke Node 18+ dulu.
+
+  Kalau mau lanjut, next step praktisnya:
+  1. nvm install 20 && nvm use 20 → bun run dev → cek visual.
+  2. git init + push ke GitHub.
+  3. Connect repo ke Vercel, set custom domain.

@@ -1,0 +1,55 @@
+---
+title: Ent Adapter
+description: Use Go Audit with the Ent ORM via mutation interceptors.
+---
+
+The Ent adapter attaches mutation interceptors so every create,
+update, and delete operation is tracked.
+
+## Installation
+
+```bash
+go get github.com/gopackx/go-audit/adapters/ent
+```
+
+## Setup
+
+```go
+import (
+    "github.com/gopackx/go-audit"
+    auditent "github.com/gopackx/go-audit/adapters/ent"
+)
+
+auditor := audit.New(client.DB(), audit.Config{
+    Dialect: audit.PostgreSQL,
+    UserFunc: func(ctx context.Context) (string, string) {
+        return "user-123", "user"
+    },
+})
+
+client.Use(auditent.Hook(auditor))
+```
+
+## How It Works
+
+The adapter wraps Ent's mutation pipeline:
+
+1. Intercept the mutation before execution to capture the current state.
+2. Let the mutation run.
+3. Diff old vs new and write the audit row.
+
+Because Ent already exposes the mutation's `Fields()` and `Op()`, the
+adapter can generate structured audit records without extra queries in
+the common case.
+
+## Supported Operations
+
+- `Create`, `Update`, `UpdateOne`, `Delete`, `DeleteOne`
+- Bulk operations — each entity gets its own audit row under a shared
+  `transaction_id`
+
+## Caveats
+
+- Raw SQL via `client.ExecContext()` is not tracked.
+- Hooks skipped via `client.Use(ent.Hook(...))` ordering need care:
+  register the audit hook **last** so it sees the final mutation state.

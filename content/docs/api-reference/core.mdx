@@ -1,0 +1,96 @@
+---
+title: Core
+description: Auditor constructor, Config, and top-level types.
+---
+
+## `audit.New(db, config) → *Auditor`
+
+Creates a new `Auditor` bound to a database connection and config.
+
+```go
+auditor := audit.New(db, audit.Config{
+    Dialect: audit.PostgreSQL,
+    UserFunc: userFromContext,
+})
+```
+
+| Param    | Type             | Description                                  |
+| -------- | ---------------- | -------------------------------------------- |
+| `db`     | `*gorm.DB` / compatible | The database handle used for audit writes.  |
+| `config` | `audit.Config`   | Dialect, user function, audit table configs. |
+
+Returns a configured `*Auditor`. No DB I/O happens until you call
+`AutoMigrate` or perform the first CRUD through an ORM adapter.
+
+## `audit.Config`
+
+```go
+type Config struct {
+    Dialect   Dialect          // PostgreSQL, MySQL, SQLite (or auto-detect)
+    UserFunc  UserFunc         // extracts (userID, userType) from ctx
+    DataAudit DataAuditConfig
+    APIAudit  APIAuditConfig
+}
+```
+
+## `audit.DataAuditConfig`
+
+```go
+type DataAuditConfig struct {
+    Enabled         bool     // default: true
+    Table           string   // default: "audit_logs"
+    ExcludeFields   []string // e.g. {"password", "token"}
+    ExcludeEntities []string // e.g. {"sessions"}
+}
+```
+
+## `audit.APIAuditConfig`
+
+```go
+type APIAuditConfig struct {
+    Enabled          bool     // default: false
+    Table            string   // default: "audit_api_logs"
+    RedactHeaders    []string // masked as "[REDACTED]"
+    RedactBodyFields []string // masked in JSON bodies
+    MaxBodySize      int      // bytes; bodies larger are truncated
+}
+```
+
+## `audit.UserFunc`
+
+```go
+type UserFunc func(ctx context.Context) (userID string, userType string)
+```
+
+Called on every audit write. Typical implementation pulls a user out of
+the request context set by middleware.
+
+```go
+func userFromContext(ctx context.Context) (string, string) {
+    if u, ok := ctx.Value(userCtxKey).(*User); ok {
+        return u.ID, u.Role
+    }
+    return "system", "system"
+}
+```
+
+## Constants
+
+```go
+const (
+    ActionCreate = "create"
+    ActionUpdate = "update"
+    ActionDelete = "delete"
+)
+
+const (
+    PostgreSQL Dialect = "postgres"
+    MySQL      Dialect = "mysql"
+    SQLite     Dialect = "sqlite"
+)
+```
+
+## `Auditor.AutoMigrate() → error`
+
+Creates the `audit_logs` table, and (if `APIAudit.Enabled`) the
+`audit_api_logs` table. Safe to call repeatedly.
