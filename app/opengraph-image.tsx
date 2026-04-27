@@ -23,8 +23,6 @@ export default function OGImage() {
           alignItems: 'center',
           justifyContent: 'center',
           backgroundColor: '#0a0a0a',
-          backgroundImage:
-            'radial-gradient(circle at 25% 10%, rgba(37,99,235,0.25), transparent 40%), radial-gradient(circle at 75% 90%, rgba(37,99,235,0.18), transparent 40%)',
           color: 'white',
           fontFamily: 'system-ui, -apple-system, sans-serif',
           padding: 80,
@@ -34,23 +32,32 @@ export default function OGImage() {
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 20,
-            marginBottom: 36,
+            gap: 24,
+            marginBottom: 32,
           }}
         >
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={logoSrc} alt="Go Audit" width={96} height={96} />
-          <span style={{ fontSize: 52, fontWeight: 700, letterSpacing: -1 }}>
+          <img src={logoSrc} alt="" width={96} height={96} />
+          <div
+            style={{
+              display: 'flex',
+              fontSize: 56,
+              fontWeight: 700,
+              letterSpacing: -1,
+            }}
+          >
             GO AUDIT
-          </span>
+          </div>
         </div>
         <div
           style={{
-            fontSize: 42,
-            lineHeight: 1.25,
-            maxWidth: 980,
+            display: 'flex',
+            fontSize: 38,
+            lineHeight: 1.3,
+            maxWidth: 920,
             textAlign: 'center',
             color: '#e5e7eb',
+            marginBottom: 40,
           }}
         >
           Automatic audit trail and API call logging for Go applications.
@@ -59,18 +66,19 @@ export default function OGImage() {
           style={{
             display: 'flex',
             alignItems: 'center',
-            marginTop: 48,
             padding: '14px 24px',
             borderRadius: 10,
             border: '1px solid #1f2937',
-            backgroundColor: 'rgba(17, 24, 39, 0.7)',
+            backgroundColor: '#0f172a',
             fontFamily: 'monospace',
-            fontSize: 26,
+            fontSize: 24,
             color: '#9ca3af',
           }}
         >
-          <span style={{ color: '#6b7280' }}>$&nbsp;</span>
-          <span>go get github.com/gopackx/go-audit</span>
+          <span style={{ color: '#6b7280', marginRight: 12 }}>$</span>
+          <span style={{ color: '#e5e7eb' }}>
+            go get github.com/gopackx/go-audit
+          </span>
         </div>
       </div>
     ),

@@ -16,12 +16,5 @@ export const baseOptions: BaseLayoutProps = {
       </span>
     ),
   },
-  links: [
-    { text: 'Docs', url: '/docs/getting-started/installation', on: 'nav' },
-    { text: 'API', url: '/docs/api-reference', on: 'nav' },
-    { text: 'Examples', url: '/docs/examples/basic', on: 'nav' },
-    { text: 'Blog', url: '#', on: 'nav' },
-    { text: 'Changelog', url: '/docs/changelog', on: 'nav' },
-  ],
   githubUrl: 'https://github.com/gopackx/go-audit',
 };
