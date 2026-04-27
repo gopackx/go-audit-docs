@@ -57,6 +57,8 @@ export default function OGImage() {
         </div>
         <div
           style={{
+            display: 'flex',
+            alignItems: 'center',
             marginTop: 48,
             padding: '14px 24px',
             borderRadius: 10,
@@ -67,8 +69,8 @@ export default function OGImage() {
             color: '#9ca3af',
           }}
         >
-          <span style={{ color: '#6b7280' }}>$ </span>
-          go get github.com/gopackx/go-audit
+          <span style={{ color: '#6b7280' }}>$&nbsp;</span>
+          <span>go get github.com/gopackx/go-audit</span>
         </div>
       </div>
     ),
