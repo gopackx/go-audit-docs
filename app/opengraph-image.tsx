@@ -1,11 +1,17 @@
 import { ImageResponse } from 'next/og';
+import fs from 'node:fs';
+import path from 'node:path';
 
-export const runtime = 'edge';
 export const alt = 'Go Audit — Automatic audit trail for Go';
 export const size = { width: 1200, height: 630 };
 export const contentType = 'image/png';
 
 export default function OGImage() {
+  const logoData = fs.readFileSync(
+    path.join(process.cwd(), 'public', 'go-audit-primary-logo.png'),
+  );
+  const logoSrc = `data:image/png;base64,${logoData.toString('base64')}`;
+
   return new ImageResponse(
     (
       <div
@@ -32,19 +38,8 @@ export default function OGImage() {
             marginBottom: 36,
           }}
         >
-          <svg
-            width="72"
-            height="72"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="#3b82f6"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            <path d="m9 12 2 2 4-4" />
-          </svg>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={logoSrc} alt="Go Audit" width={96} height={96} />
           <span style={{ fontSize: 52, fontWeight: 700, letterSpacing: -1 }}>
             GO AUDIT
           </span>

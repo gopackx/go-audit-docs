@@ -1,0 +1,5 @@
+{
+  "title": "Schema",
+  "defaultOpen": false,
+  "pages": ["audit-logs", "audit-api-logs"]
+}

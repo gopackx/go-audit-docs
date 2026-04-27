@@ -1,0 +1,15 @@
+{
+  "title": "Features",
+  "defaultOpen": false,
+  "pages": [
+    "auto-diff",
+    "api-logging",
+    "snapshot-restore",
+    "multi-database",
+    "redaction",
+    "transaction-correlation",
+    "custom-tables",
+    "query-builder",
+    "field-exclusion"
+  ]
+}

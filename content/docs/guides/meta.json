@@ -1,0 +1,5 @@
+{
+  "title": "Guides",
+  "defaultOpen": false,
+  "pages": ["migration-from-manual", "laravel-comparison", "production-tips"]
+}

@@ -1,31 +1,27 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import Image from 'next/image';
 
 export const baseOptions: BaseLayoutProps = {
   nav: {
     title: (
-      <span className="flex items-center gap-2 font-semibold">
-        <ShieldIcon />
+      <span className="flex items-center gap-2 font-semibold text-[#0F172A] dark:text-[#F1F5F9]">
+        <Image
+          src="/go-audit-primary-logo.png"
+          alt="go-audit"
+          width={24}
+          height={24}
+          priority
+        />
         Go Audit
       </span>
     ),
   },
+  links: [
+    { text: 'Docs', url: '/docs/getting-started/installation', on: 'nav' },
+    { text: 'API', url: '/docs/api-reference', on: 'nav' },
+    { text: 'Examples', url: '/docs/examples/basic', on: 'nav' },
+    { text: 'Blog', url: '#', on: 'nav' },
+    { text: 'Changelog', url: '/docs/changelog', on: 'nav' },
+  ],
+  githubUrl: 'https://github.com/gopackx/go-audit',
 };
-
-function ShieldIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-      <path d="m9 12 2 2 4-4" />
-    </svg>
-  );
-}
