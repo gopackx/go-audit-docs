@@ -1,0 +1,90 @@
+---
+title: Store Interface
+description: The persistence abstraction behind the Auditor and how to implement a custom one.
+---
+
+Every `Auditor` writes through a `Store`. Go Audit ships two
+implementations — a `database/sql`-backed store (the default) and an
+in-memory store for tests — and you can supply your own via
+[`audit.NewWithStore`](/docs/api-reference/core).
+
+## The Interface
+
+```go
+type Store interface {
+    SaveDataLog(ctx context.Context, table string, log AuditLog) error
+    SaveAPILog(ctx context.Context, table string, log AuditAPILog) error
+    QueryDataLogs(ctx context.Context, table string, filter DataFilter) ([]AuditLog, error)
+    QueryAPILogs(ctx context.Context, table string, filter APIFilter) ([]AuditAPILog, error)
+    Purge(ctx context.Context, table string, before time.Time) (int64, error)
+    Exec(ctx context.Context, stmt string) error
+}
+```
+
+| Method           | Purpose                                                                 |
+| ---------------- | ----------------------------------------------------------------------- |
+| `SaveDataLog`    | Persist one data-change row into `table`.                               |
+| `SaveAPILog`     | Persist one API-call row into `table`.                                  |
+| `QueryDataLogs`  | Return data rows matching the filter, **newest first**.                 |
+| `QueryAPILogs`   | Return API rows matching the filter, **newest first**.                  |
+| `Purge`          | Delete rows in `table` whose `created_at` is strictly older than `before`; return the count removed. |
+| `Exec`           | Run a DDL statement. Called by `AutoMigrate` to create tables/indexes.  |
+
+The `table` argument is the configured table name (`DataAudit.Table` /
+`APIAudit.Table`) — the `Auditor` resolves it and passes it on every
+call, so a single `Store` can serve both audit tables.
+
+## Built-In Constructors
+
+```go
+audit.NewSQLStore(db *sql.DB, d Dialect) Store
+audit.NewMemoryStore() Store
+```
+
+- **`NewSQLStore`** backs the default path used by `audit.New`. It
+  builds parameterized `INSERT` / `SELECT` / `DELETE` statements using
+  the dialect's placeholder style and orders query results by `id DESC`
+  (newest first).
+- **`NewMemoryStore`** keeps rows in memory, guarded by a mutex, and is
+  intended for unit tests. `Exec` is a no-op (no schema to create), so
+  `AutoMigrate` is effectively free against it.
+
+## Using a Custom Store
+
+Pass any `Store` implementation to `audit.NewWithStore`:
+
+```go
+auditor, err := audit.NewWithStore(myStore, audit.DialectFor(audit.PostgreSQL), audit.Config{
+    Dialect:   audit.PostgreSQL,
+    UserFunc:  userFromContext,
+    DataAudit: audit.DataAuditConfig{Enabled: true},
+})
+```
+
+`NewWithStore` still requires a `Dialect` — it is used for
+`AutoMigrate` DDL generation and (for the SQL store) placeholder style.
+A custom store that ignores SQL can pass any registered dialect.
+
+### What a Custom Store Must Honor
+
+- **Filtering.** Apply every non-zero field on `DataFilter` /
+  `APIFilter`, combined with AND. Zero values mean "no constraint".
+- **Ordering.** Return rows newest-first so pagination and timelines
+  behave as documented.
+- **Pagination.** Respect `Limit` and `Offset`.
+- **Purge semantics.** Delete strictly older than `before`
+  (`created_at < before`) and return the number of rows removed.
+
+### When You'd Implement One
+
+- Writing audit rows to a queue or log pipeline instead of SQL.
+- Buffering writes in memory and flushing in batches for very
+  high-throughput paths (see [Production Tips](/docs/guides/production-tips)).
+- Routing audit data to a separate datastore from your application DB.
+
+## Related
+
+- [Core](/docs/api-reference/core) — `NewWithStore`, `NewSQLStore`,
+  `NewMemoryStore`.
+- [Dialect Interface](/docs/api-reference/dialect) — required alongside
+  a custom store.

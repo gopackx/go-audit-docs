@@ -24,8 +24,9 @@ Behavior:
 - Skips writing when `EntityType` is in `DataAudit.ExcludeEntities`.
 - Applies diff and field exclusion before persistence.
 - Suppresses UPDATE rows where nothing changed after exclusion.
-- For DELETEs without captured `OldValues`, uses `NewValues` as the
-  old state.
+- For DELETEs, persists `OldValues` and stores `null` for
+  `new_values`. (The GORM adapter populates `OldValues` from the row
+  being deleted; raw callers should supply it.)
 - Reads `UserFunc` for `user_id` / `user_type`.
 - Uses `entry.TransactionID` if set; otherwise reads it from the
   context via `audit.TransactionIDFromContext(ctx)`.
@@ -57,7 +58,7 @@ type DataEntry struct {
 ## `Auditor.Query(ctx, filter) → ([]AuditLog, error)`
 
 Fetches data audit records matching a filter. Default order is
-`created_at DESC`.
+`id DESC` (newest first).
 
 ```go
 logs, err := auditor.Query(ctx, audit.DataFilter{

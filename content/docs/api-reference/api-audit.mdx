@@ -31,7 +31,7 @@ _ = auditor.API().Record(ctx, audit.APIEntry{
 ## `Auditor.API().Query(ctx, filter) → ([]AuditAPILog, error)`
 
 Returns API call records matching the filter, ordered by
-`created_at DESC`.
+`id DESC` (newest first).
 
 ## `audit.APIEntry`
 

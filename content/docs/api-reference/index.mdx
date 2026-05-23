@@ -1,6 +1,39 @@
 ---
 title: API Reference
-description: Public methods on the Auditor type. All methods accept a context.Context and return errors using fmt.Errorf wrapping for cause inspection.
+description: Public API for the Auditor type. Every method takes a context.Context and wraps errors with fmt.Errorf for cause inspection.
 ---
 
-Complete API reference for the Auditor type.
+Complete reference for Go Audit's public API. Every method on the
+`Auditor` accepts a `context.Context` and returns errors wrapped with
+`fmt.Errorf` for cause inspection.
+
+## Sections
+
+- [Core](/docs/api-reference/core) — `audit.New`, `NewWithStore`,
+  `Config`, and the `Auditor` interface.
+- [Data Audit API](/docs/api-reference/data-audit) — `RecordDataChange`,
+  `Query`, and the `DataEntry` / `AuditLog` types.
+- [API Audit API](/docs/api-reference/api-audit) — `API().Record`,
+  `API().Query`, and the `APIEntry` / `AuditAPILog` types.
+- [Query & Filters](/docs/api-reference/query) — `QueryByTransaction`,
+  pagination, `Purge`, `Snapshot`, and `Restore`.
+- [Dialect Interface](/docs/api-reference/dialect) — built-in dialects
+  and registering a custom one.
+- [Store Interface](/docs/api-reference/store) — the persistence
+  abstraction and how to plug in your own.
+
+## The `Auditor` Interface
+
+```go
+type Auditor interface {
+    RecordDataChange(ctx context.Context, entry DataEntry) error
+    API() APIAuditor
+    Query(ctx context.Context, filter DataFilter) ([]AuditLog, error)
+    QueryByTransaction(ctx context.Context, txID string) (*TransactionLog, error)
+    AutoMigrate(ctx context.Context) error
+    Purge(ctx context.Context, before time.Time) (PurgeResult, error)
+    Snapshot(ctx context.Context, entityType, entityID string, at time.Time) (map[string]any, error)
+    Restore(ctx context.Context, entityType, entityID string, at time.Time) (*RestoreResult, error)
+    Config() Config
+}
+```

@@ -44,7 +44,9 @@ For very large tables, prefer keyset pagination against `created_at`
 
 ## Sorting
 
-All queries return results ordered by `created_at DESC` by default.
+All queries return results ordered by `id DESC` (newest first). Since
+`id` is a monotonic auto-increment key, this matches insertion order —
+effectively `created_at DESC` for normally-inserted rows.
 
 ## Transaction ID Helpers
 

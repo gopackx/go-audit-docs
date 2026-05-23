@@ -73,7 +73,8 @@ filters — filter on `Service` plus `TransactionID` or a date range.
 
 ## Ordering and Pagination
 
-- Default order is `created_at DESC` (newest first).
+- Default order is `id DESC` — newest first (matches `created_at` for
+  normally-inserted rows).
 - Use `Limit` + `Offset` for offset pagination.
 
 ```go

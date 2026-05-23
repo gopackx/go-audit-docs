@@ -1,6 +1,131 @@
 ---
 title: Snapshot & Restore
-description: Reconstruct any entity's exact state at any past moment. When you need to — or roll back live data. Every operation is itself recorded, so a restore is just another auditable event.
+description: Reconstruct any entity's exact state at any past moment — or roll it back. Every restore is itself an auditable event.
 ---
 
-Time-travel any record, restore previous state, and purge old logs.
+Because every create, update, and delete is stored as an immutable
+change record, Go Audit can replay that history to reconstruct an
+entity's state at any past moment — and write it back if you need to
+roll forward to a known-good version.
+
+## How Snapshots Work
+
+`Snapshot` fetches every audit row for an entity up to a cutoff time,
+then replays them in chronological order: a `create`/`restore` resets
+the state, an `update` applies the changed fields, and a
+`delete`/`soft_delete` clears it. The replay is purely in-memory — it
+issues one read query and never writes.
+
+## Capture a Snapshot
+
+```go
+func (Auditor) Snapshot(
+    ctx context.Context,
+    entityType, entityID string,
+    at time.Time,
+) (map[string]any, error)
+```
+
+```go
+// reconstruct order 42 as it was at the start of 2026
+at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+
+state, err := auditor.Snapshot(ctx, "orders", "42", at)
+if err != nil {
+    return err
+}
+// state is the column → value map at that moment
+```
+
+Returns `nil` (without error) if the entity did not exist or had been
+deleted at that time. Requires a non-empty `entityType` and
+`entityID`, and a non-zero `at`.
+
+## Restore an Entity
+
+```go
+func (Auditor) Restore(
+    ctx context.Context,
+    entityType, entityID string,
+    at time.Time,
+) (*RestoreResult, error)
+```
+
+`Restore` reconstructs the target state via `Snapshot`, writes a
+`restore` audit entry (old values = current state, new values = target
+state), and returns the target values. **It does not write to your
+domain table** — you apply the returned values through your ORM. The
+adapter will not double-record that write, because the `restore` entry
+is already persisted.
+
+```go
+result, err := auditor.Restore(ctx, "orders", "42", at)
+if err != nil {
+    return err
+}
+
+// apply the returned values via GORM
+gormDB.Model(&Order{ID: 42}).Updates(result.Values)
+```
+
+```go
+type RestoreResult struct {
+    EntityType string         `json:"entity_type"`
+    EntityID   string         `json:"entity_id"`
+    Values     map[string]any `json:"values,omitempty"`
+    WasDeleted bool           `json:"was_deleted"`
+}
+```
+
+`WasDeleted` is `true` when the target state was empty (the entity did
+not exist at `at`).
+
+<Callout type="warn">
+Restore overwrites live rows when you apply the returned values, so
+production restores should be approved out-of-band. The previous state
+is never lost — it remains in the audit log, and the restore itself is
+recorded.
+</Callout>
+
+## Purge Old Logs
+
+Snapshots can only replay history that still exists in the audit
+tables. Use `Purge` on a schedule to enforce retention.
+
+```go
+func (Auditor) Purge(ctx context.Context, before time.Time) (PurgeResult, error)
+```
+
+```go
+// run nightly: drop entries older than 180 days
+cutoff := time.Now().AddDate(0, 0, -180)
+
+result, err := auditor.Purge(ctx, cutoff)
+if err != nil {
+    return err
+}
+log.Printf("purged data=%d api=%d", result.DataLogs, result.APILogs)
+```
+
+`Purge` deletes rows older than `before` from `audit_logs` and
+`audit_api_logs` (only the tables that are enabled) and returns a
+`PurgeResult`:
+
+```go
+type PurgeResult struct {
+    DataLogs int64
+    APILogs  int64
+}
+```
+
+<Callout type="warn">
+Purge is irreversible — deleted entries cannot be reconstructed, and
+neither can snapshots that depend on them. Take any time-travel cutoff
+you need before purging in production.
+</Callout>
+
+## Related
+
+- [Query & Filters](/docs/api-reference/query) — full method reference.
+- [Production Tips](/docs/guides/production-tips) — retention and
+  partitioning at scale.
