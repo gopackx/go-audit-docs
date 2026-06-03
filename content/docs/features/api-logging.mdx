@@ -38,27 +38,27 @@ start := time.Now()
 resp, err := httpClient.Do(req)
 duration := time.Since(start)
 
-headers := map[string]string{}
-for k, v := range req.Header {
-    if len(v) > 0 {
-        headers[k] = v[0]
-    }
-}
+reqHeaders := flatten(req.Header)
+respHeaders := flatten(resp.Header)
 
 _ = auditor.API().Record(ctx, audit.APIEntry{
-    Service:        "bca",
-    Endpoint:       "/v1/transfer",
-    Method:         http.MethodPost,
-    StatusCode:     resp.StatusCode,
-    RequestHeaders: headers,
-    RequestBody:    reqBody,
-    ResponseBody:   respBody,
-    DurationMs:     int(duration.Milliseconds()),
+    Service:         "bca",
+    Endpoint:        "/v1/transfer",
+    Method:          http.MethodPost,
+    StatusCode:      resp.StatusCode,
+    RequestHeaders:  reqHeaders,
+    ResponseHeaders: respHeaders,
+    RequestBody:     reqBody,
+    ResponseBody:    respBody,
+    DurationMs:      int(duration.Milliseconds()),
 })
 ```
 
-`RequestHeaders` is `map[string]string`. `RequestBody` and
-`ResponseBody` are `any` — anything JSON-encodable works.
+`RequestHeaders` and `ResponseHeaders` are both `map[string]string`
+and share the same `RedactHeaders` list. `RequestBody` and
+`ResponseBody` are `any` — structs, pointers, and maps all work
+because the auditor normalizes them through `encoding/json` before
+redaction.
 
 ## Auto Redaction
 
@@ -73,6 +73,10 @@ replaced the same way.
     "Authorization": "***REDACTED***",
     "Content-Type": "application/json"
   },
+  "response_headers": {
+    "Set-Cookie": "***REDACTED***",
+    "Content-Type": "application/json"
+  },
   "request_body": {
     "card_number": "***REDACTED***",
     "amount": 100000
@@ -80,8 +84,9 @@ replaced the same way.
 }
 ```
 
-The redaction is symmetric — it applies to both request **and**
-response bodies.
+The redaction is symmetric — it applies to **request and response**
+headers (via `RedactHeaders`) and **request and response** bodies
+(via `RedactBodyFields`).
 
 ## Body Truncation
 

@@ -46,7 +46,8 @@ APIAudit: audit.APIAuditConfig{
 }
 ```
 
-- `RedactHeaders` — case-**insensitive** header name match. Value is
+- `RedactHeaders` — case-**insensitive** header name match. Applied
+  to **both** `RequestHeaders` and `ResponseHeaders`. Value is
   replaced with `"***REDACTED***"`.
 - `RedactBodyFields` — case-**insensitive** JSON key match at any
   depth in request and response bodies. Value is replaced with
@@ -58,10 +59,39 @@ APIAudit: audit.APIAuditConfig{
     "Authorization": "***REDACTED***",
     "Content-Type": "application/json"
   },
+  "response_headers": {
+    "Set-Cookie": "***REDACTED***"
+  },
   "request_body": {
     "customer": { "card_number": "***REDACTED***", "name": "Ada" }
   }
 }
+```
+
+### Body shape — struct, pointer, or map
+
+`RequestBody` / `ResponseBody` are typed `any`, and `RedactBodyFields`
+works on whatever you pass:
+
+- `map[string]any` / `[]any` (already JSON-shaped) — walked directly.
+- Structs, pointers, named maps — normalized through `encoding/json`
+  first. **Matching is on JSON tag names**, not Go field names. A
+  field tagged `` `json:"card_number"` `` matches a redaction list
+  entry `"card_number"` regardless of the Go field's name.
+- Scalars (`string`, numbers, `bool`) and raw `[]byte`/`json.RawMessage`
+  pass through unchanged.
+
+```go
+type ChargeRequest struct {
+    Amount     int64  `json:"amount"`
+    CardNumber string `json:"card_number"` // → matches RedactBodyFields["card_number"]
+    Currency   string `json:"currency"`
+}
+
+_ = auditor.API().Record(ctx, audit.APIEntry{
+    // ...
+    RequestBody: ChargeRequest{Amount: 100_000, CardNumber: "4242…"},
+})
 ```
 
 ## Why Different Strategies?

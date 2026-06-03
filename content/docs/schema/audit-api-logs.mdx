@@ -20,6 +20,7 @@ Table name is configurable via `APIAudit.Table`; the default is
 | `method`          | `VARCHAR(10)`  | `VARCHAR(10)`        | `TEXT`     | `GET`, `POST`, `PUT`, `DELETE` |
 | `status_code`     | `INT`          | `INT`                | `INTEGER`  | HTTP status code             |
 | `request_headers` | `JSONB`        | `JSON`               | `TEXT`     | Request headers (redacted)   |
+| `response_headers`| `JSONB`        | `JSON`               | `TEXT`     | Response headers (redacted)  |
 | `request_body`    | `JSONB`        | `JSON`               | `TEXT`     | Request body (redacted, truncated) |
 | `response_body`   | `JSONB`        | `JSON`               | `TEXT`     | Response body (redacted, truncated) |
 | `duration_ms`     | `INT`          | `INT`                | `INTEGER`  | Request duration             |
@@ -45,26 +46,46 @@ idx_<table>_transaction (transaction_id)
 
 ```go
 type AuditAPILog struct {
-    ID             uint64          `json:"id"`
-    Service        string          `json:"service"`
-    Endpoint       string          `json:"endpoint"`
-    Method         string          `json:"method"`
-    StatusCode     int             `json:"status_code"`
-    RequestHeaders json.RawMessage `json:"request_headers,omitempty"`
-    RequestBody    json.RawMessage `json:"request_body,omitempty"`
-    ResponseBody   json.RawMessage `json:"response_body,omitempty"`
-    DurationMs     int             `json:"duration_ms"`
-    ErrorMessage   string          `json:"error_message,omitempty"`
-    UserID         string          `json:"user_id,omitempty"`
-    Metadata       json.RawMessage `json:"metadata,omitempty"`
-    TransactionID  string          `json:"transaction_id,omitempty"`
-    CreatedAt      time.Time       `json:"created_at"`
+    ID              uint64          `json:"id"`
+    Service         string          `json:"service"`
+    Endpoint        string          `json:"endpoint"`
+    Method          string          `json:"method"`
+    StatusCode      int             `json:"status_code"`
+    RequestHeaders  json.RawMessage `json:"request_headers,omitempty"`
+    ResponseHeaders json.RawMessage `json:"response_headers,omitempty"`
+    RequestBody     json.RawMessage `json:"request_body,omitempty"`
+    ResponseBody    json.RawMessage `json:"response_body,omitempty"`
+    DurationMs      int             `json:"duration_ms"`
+    ErrorMessage    string          `json:"error_message,omitempty"`
+    UserID          string          `json:"user_id,omitempty"`
+    Metadata        json.RawMessage `json:"metadata,omitempty"`
+    TransactionID   string          `json:"transaction_id,omitempty"`
+    CreatedAt       time.Time       `json:"created_at"`
 }
 ```
 
-`RequestHeaders`, `RequestBody`, `ResponseBody`, and `Metadata` are
-`json.RawMessage` — decode them into whatever shape your caller
-expects.
+`RequestHeaders`, `ResponseHeaders`, `RequestBody`, `ResponseBody`,
+and `Metadata` are `json.RawMessage` — decode them into whatever
+shape your caller expects.
+
+## Upgrading from v1.0.x
+
+`response_headers` was added in **v1.1.0**. `AutoMigrate` uses
+`CREATE TABLE IF NOT EXISTS`, so existing deployments must add the
+column manually before upgrading:
+
+```sql
+-- PostgreSQL
+ALTER TABLE audit_api_logs ADD COLUMN response_headers JSONB;
+
+-- MySQL
+ALTER TABLE audit_api_logs ADD COLUMN response_headers JSON;
+
+-- SQLite
+ALTER TABLE audit_api_logs ADD COLUMN response_headers TEXT;
+```
+
+Fresh installs running v1.1.0+ get the column automatically.
 
 ## Example Records
 

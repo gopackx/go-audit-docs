@@ -29,6 +29,26 @@ you only pull in the ORM you actually use.
 | Bun  | `go get github.com/gopackx/go-audit/adapters/bun`  |
 | Ent  | `go get github.com/gopackx/go-audit/adapters/ent`  |
 
+### Adapter versions
+
+Adapter sub-modules are tagged independently from the core module
+(Go's standard multi-module layout). When you pin a version, target
+the adapter tag — for example `adapters/gorm/v1.1.0`, not just
+`v1.1.0`:
+
+```bash
+go get github.com/gopackx/go-audit@v1.1.0
+go get github.com/gopackx/go-audit/adapters/gorm@v1.1.0
+```
+
+If the adapter hasn't been tagged yet for a given release, pin to
+`@master` to pick up the latest commit as a pseudo-version:
+
+```bash
+go get github.com/gopackx/go-audit/adapters/gorm@master
+# go.mod rewrites this to e.g. v0.0.0-20260413120000-abcdef012345
+```
+
 ## Supported Databases
 
 | Database   | JSON Type | Index Strategy                   |

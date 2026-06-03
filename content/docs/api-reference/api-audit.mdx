@@ -37,26 +37,28 @@ Returns API call records matching the filter, ordered by
 
 ```go
 type APIEntry struct {
-    Service        string
-    Endpoint       string
-    Method         string
-    StatusCode     int
-    RequestHeaders map[string]string
-    RequestBody    any
-    ResponseBody   any
-    DurationMs     int
-    ErrorMessage   string
-    Metadata       map[string]any
-    TransactionID  string
+    Service         string
+    Endpoint        string
+    Method          string
+    StatusCode      int
+    RequestHeaders  map[string]string
+    ResponseHeaders map[string]string
+    RequestBody     any
+    ResponseBody    any
+    DurationMs      int
+    ErrorMessage    string
+    Metadata        map[string]any
+    TransactionID   string
 }
 ```
 
-| Field            | Notes                                                           |
-| ---------------- | --------------------------------------------------------------- |
-| `RequestHeaders` | `map[string]string`. One value per header key.                  |
-| `RequestBody`    | `any` — anything JSON-encodable.                                |
-| `ResponseBody`   | `any` — same.                                                   |
-| `TransactionID`  | Overrides context transaction ID when set.                       |
+| Field             | Notes                                                                                   |
+| ----------------- | --------------------------------------------------------------------------------------- |
+| `RequestHeaders`  | `map[string]string`. One value per header key.                                          |
+| `ResponseHeaders` | `map[string]string`. Redacted using the same `RedactHeaders` list as `RequestHeaders`. |
+| `RequestBody`     | `any` — anything JSON-encodable (struct, map, pointer, …).                              |
+| `ResponseBody`    | `any` — same.                                                                           |
+| `TransactionID`   | Overrides context transaction ID when set.                                              |
 
 ## `audit.APIFilter`
 
@@ -80,22 +82,23 @@ Method and endpoint are intentionally not filter fields — use
 
 ```go
 type AuditAPILog struct {
-    ID             uint64          `json:"id"`
-    Service        string          `json:"service"`
-    Endpoint       string          `json:"endpoint"`
-    Method         string          `json:"method"`
-    StatusCode     int             `json:"status_code"`
-    RequestHeaders json.RawMessage `json:"request_headers,omitempty"`
-    RequestBody    json.RawMessage `json:"request_body,omitempty"`
-    ResponseBody   json.RawMessage `json:"response_body,omitempty"`
-    DurationMs     int             `json:"duration_ms"`
-    ErrorMessage   string          `json:"error_message,omitempty"`
-    UserID         string          `json:"user_id,omitempty"`
-    Metadata       json.RawMessage `json:"metadata,omitempty"`
-    TransactionID  string          `json:"transaction_id,omitempty"`
-    CreatedAt      time.Time       `json:"created_at"`
+    ID              uint64          `json:"id"`
+    Service         string          `json:"service"`
+    Endpoint        string          `json:"endpoint"`
+    Method          string          `json:"method"`
+    StatusCode      int             `json:"status_code"`
+    RequestHeaders  json.RawMessage `json:"request_headers,omitempty"`
+    ResponseHeaders json.RawMessage `json:"response_headers,omitempty"`
+    RequestBody     json.RawMessage `json:"request_body,omitempty"`
+    ResponseBody    json.RawMessage `json:"response_body,omitempty"`
+    DurationMs      int             `json:"duration_ms"`
+    ErrorMessage    string          `json:"error_message,omitempty"`
+    UserID          string          `json:"user_id,omitempty"`
+    Metadata        json.RawMessage `json:"metadata,omitempty"`
+    TransactionID   string          `json:"transaction_id,omitempty"`
+    CreatedAt       time.Time       `json:"created_at"`
 }
 ```
 
-`RequestHeaders`, `RequestBody`, `ResponseBody`, and `Metadata` are
-`json.RawMessage` — decode them at read time.
+`RequestHeaders`, `ResponseHeaders`, `RequestBody`, `ResponseBody`,
+and `Metadata` are `json.RawMessage` — decode them at read time.

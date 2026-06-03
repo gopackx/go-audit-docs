@@ -3,6 +3,45 @@ title: Changelog
 description: Release notes for Go Audit.
 ---
 
+## v1.1.0
+
+### Bug fixes (correctness)
+
+- **adapters/gorm**: `db.Where("…").Update/Delete` no longer emits
+  `WHERE WHERE …` (PostgreSQL `42601`, which previously cancelled the
+  user's write). The pre-write snapshot SELECT now unwraps the
+  `clause.Where` expression so the SQL builder writes exactly one
+  `WHERE`.
+- **adapters/gorm**: `Create` with nested associations no longer
+  duplicates child audit rows (2 items → was 4 rows). The callback
+  keeps a per-statement `(entity_type, entity_id)` dedup set.
+- **core**: `old_values` on `create` is now persisted as SQL `NULL`
+  instead of the literal JSON token `"null"`. Affected callers that
+  passed a typed-nil `map[string]any`.
+
+### New
+
+- `APIEntry.ResponseHeaders` (`map[string]string`) — redacted using
+  the same `RedactHeaders` list as `RequestHeaders`, persisted into a
+  new `response_headers` column on `audit_api_logs`.
+- `RedactBodyFields` now redacts struct and pointer payloads, not
+  only `map[string]any`. The auditor JSON-round-trips the value
+  first; matching is on JSON tag names.
+
+### Docs
+
+- README pulled to parity with the docs site: `ExcludeEntities`,
+  `SkipOldValues`, per-table `OnError`,
+  `gorm.Session{SkipHooks: true}`, adapter pseudo-version install, and
+  a dedicated `*sql.DB` production tip.
+
+### ⚠️ Migration
+
+`AutoMigrate` uses `CREATE TABLE IF NOT EXISTS`, so the new
+`response_headers` column is only created on fresh installs. Existing
+deployments must run a one-shot `ALTER TABLE` per dialect — see
+[`audit_api_logs` → Upgrading from v1.0.x](/docs/schema/audit-api-logs#upgrading-from-v10x).
+
 ## v1.0.0
 
 - Initial stable release
