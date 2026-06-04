@@ -1,0 +1,9 @@
+{
+  "title": "AI Integration",
+  "defaultOpen": false,
+  "pages": [
+    "overview",
+    "claude-skill",
+    "mcp-server"
+  ]
+}

@@ -35,6 +35,18 @@ description: Release notes for Go Audit.
   `gorm.Session{SkipHooks: true}`, adapter pseudo-version install, and
   a dedicated `*sql.DB` production tip.
 
+### AI integration
+
+- **Claude Skill** (`skills/go-audit/SKILL.md`) — drop into
+  `~/.claude/skills/go-audit/` and Claude Code knows how to integrate
+  go-audit from a cold prompt. See
+  [Claude Skill](/docs/ai-integration/claude-skill).
+- **MCP server** (`mcp/`) — read-only Model Context Protocol server
+  exposing `query_data_logs`, `query_api_logs`,
+  `query_by_transaction`, `snapshot_entity`, and `recent_changes` so
+  AI hosts can investigate audit history conversationally. See
+  [MCP Server](/docs/ai-integration/mcp-server).
+
 ### ⚠️ Migration
 
 `AutoMigrate` uses `CREATE TABLE IF NOT EXISTS`, so the new

@@ -1,0 +1,152 @@
+---
+title: MCP Server
+description: Read-only Model Context Protocol server that exposes go-audit's query API as AI tools.
+---
+
+`audit-mcp` is a Go binary that speaks the
+[Model Context Protocol](https://modelcontextprotocol.io). Once wired
+into your AI host (Claude Code, Claude Desktop, Cursor), you can ask
+the audit log questions conversationally:
+
+> *"Show me every change to order #42 in the last 24 hours."*
+>
+> *"What did user 17 look like at 09:00 yesterday?"*
+>
+> *"Give me the full transaction view for `20260413T...`."*
+
+Behind the scenes, the AI calls one of five tools the server exposes,
+the server queries your audit DB, and the AI summarizes the result.
+
+## Read-only by design
+
+The server **never** issues `INSERT`, `UPDATE`, `DELETE`, or `ALTER`.
+Exposed tool surface is strictly read:
+
+- `auditor.Query`
+- `auditor.API().Query`
+- `auditor.QueryByTransaction`
+- `auditor.Snapshot`
+
+`Purge` and `Restore` are intentionally **not** exposed. Destructive
+operations belong in your app's own admin tooling, not in an AI tool
+surface.
+
+For maximum safety, point the server at a database user with
+`SELECT`-only privileges on the two audit tables.
+
+## Tools
+
+| Tool                    | Description                                                                                                                |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `query_data_logs`       | Filtered search of `audit_logs` by entity_type, entity_id, action, user_id, transaction_id, date range. Newest-first.      |
+| `query_api_logs`        | Filtered search of `audit_api_logs` by service, status_code, user_id, transaction_id, date range. Newest-first.            |
+| `query_by_transaction`  | Combined data + API view for one `transaction_id`. The canonical "full story of one business operation" query.              |
+| `snapshot_entity`       | Reconstruct entity state at a point in time by replaying the audit log up to `at`. Returns `null` if entity didn't exist. |
+| `recent_changes`        | Activity-feed shortcut: last N data changes, optionally scoped to one `entity_type`. Default 20, cap 200.                  |
+
+All row-returning tools cap at **500 rows** to keep responses within
+the AI's context window.
+
+## Install
+
+```bash
+# Installs as the binary `mcp` (Go uses the module directory name).
+go install github.com/gopackx/go-audit/mcp@latest
+
+# Optional: rename for clarity.
+mv "$(go env GOBIN)/mcp" "$(go env GOBIN)/audit-mcp"
+```
+
+The binary embeds pure-Go drivers for PostgreSQL (pgx), MySQL, and
+SQLite (`modernc.org/sqlite`) — no cgo, no native libs needed.
+
+## Configure
+
+Configuration is via environment variables:
+
+| Variable               | Required | Default            | Description                                              |
+| ---------------------- | -------- | ------------------ | -------------------------------------------------------- |
+| `GOAUDIT_DIALECT`      | yes      | —                  | `postgres` &#124; `mysql` &#124; `sqlite`                |
+| `GOAUDIT_DSN`          | yes      | —                  | Driver-specific connection string                        |
+| `GOAUDIT_DATA_TABLE`   | no       | `audit_logs`       | Override if you customized `DataAudit.Table`             |
+| `GOAUDIT_API_TABLE`    | no       | `audit_api_logs`   | Override if you customized `APIAudit.Table`              |
+
+DSN examples:
+
+```
+# PostgreSQL (pgx)
+postgres://audit_reader:secret@db.internal:5432/myapp?sslmode=require
+
+# MySQL
+audit_reader:secret@tcp(db.internal:3306)/myapp?parseTime=true
+
+# SQLite
+file:/var/lib/myapp/audit.db?mode=ro
+```
+
+## Wire into Claude Code
+
+Add to `~/.claude/mcp.json` (user-scoped) or `.mcp.json` in your
+project root (team-scoped):
+
+```json
+{
+  "mcpServers": {
+    "go-audit": {
+      "command": "audit-mcp",
+      "env": {
+        "GOAUDIT_DIALECT": "postgres",
+        "GOAUDIT_DSN": "postgres://audit_reader:secret@db.internal:5432/myapp?sslmode=require"
+      }
+    }
+  }
+}
+```
+
+Restart Claude Code. The five tools above appear in tool listings and
+the AI will reach for them when you ask about audit history.
+
+## Wire into Claude Desktop
+
+Same JSON shape. In the Desktop app, open Settings → MCP → Edit
+Config and paste the `mcpServers` block.
+
+## Wire into Cursor
+
+Cursor reads `~/.cursor/mcp.json` with the same schema.
+
+## Smoke test
+
+Confirm the binary handshakes properly without touching a real
+production DB by pointing it at an in-memory SQLite:
+
+```bash
+GOAUDIT_DIALECT=sqlite GOAUDIT_DSN=":memory:" audit-mcp <<EOF
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"1"}}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list"}
+EOF
+```
+
+You should see two JSON-RPC response lines on stdout, the second
+listing all five tools.
+
+## Versioning
+
+Tagged independently from the core library: `mcp/v1.1.0`, `mcp/v1.2.0`,
+etc. Install a specific version:
+
+```bash
+go install github.com/gopackx/go-audit/mcp@v1.1.0
+```
+
+## Limitations
+
+- **Stdio transport only.** HTTP/SSE transport isn't wired up — all
+  three target AI hosts use stdio anyway, but if you need
+  remote-deploy MCP, you'll need to wrap the binary.
+- **Read-only.** As stated above, deliberate. Open an issue if your
+  workflow needs scoped write access — there are well-known patterns
+  for safe AI-driven writes, but we want to think through them
+  before exposing them.
+- **No automatic dialect detection.** The server requires
+  `GOAUDIT_DIALECT` to be set explicitly, same as the core library.

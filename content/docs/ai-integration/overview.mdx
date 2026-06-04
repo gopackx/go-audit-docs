@@ -1,0 +1,54 @@
+---
+title: Overview
+description: First-class support for AI coding assistants — integrate go-audit faster and query history conversationally.
+---
+
+Go Audit ships with two artifacts so AI coding assistants can both
+**integrate** the library into a new project and **query** existing
+audit history conversationally:
+
+- **Claude Skill** — teaches Claude how to add go-audit to a Go
+  project from a cold prompt (`"set up an audit trail for this
+  service"`). Covers install, `Config`, adapter registration,
+  redaction, and the common pitfalls.
+- **MCP server** — a read-only Model Context Protocol server that
+  exposes `Query`, `QueryByTransaction`, `Snapshot`, and friends as
+  tools. Drop it into Claude Code / Claude Desktop / Cursor and ask
+  things like *"show me every change to order #42 in the last 24
+  hours"* or *"what did user 17 look like at 09:00 yesterday?"*.
+
+Both are optional. Go Audit itself runs without either.
+
+## Skill vs MCP — which do I need?
+
+| You want to…                                                       | Use            |
+| ------------------------------------------------------------------ | -------------- |
+| Let Claude Code add go-audit to a new Go project for you           | Claude Skill   |
+| Let Claude Code refactor existing manual logging into go-audit     | Claude Skill   |
+| Investigate production audit data via a chat UI                    | MCP server     |
+| Reconstruct an entity's past state during incident response        | MCP server     |
+| Build an AI-driven compliance / forensics dashboard                | MCP server     |
+| Both (recommended for active projects)                             | Skill + MCP    |
+
+The Skill helps at *build time*. The MCP server helps at *run /
+investigation time*. They're complementary.
+
+## Trust model
+
+- **Claude Skill** runs locally on the developer machine — it is just
+  markdown instructions that Claude Code reads. It never executes
+  network calls on its own. The developer is always in the loop for
+  every command Claude runs.
+- **MCP server** is **read-only by design**. The exposed tools call
+  only `auditor.Query`, `auditor.API().Query`,
+  `auditor.QueryByTransaction`, and `auditor.Snapshot`. Destructive
+  operations (`Purge`, `Restore`) are intentionally **not** exposed.
+  We recommend pointing it at a database user with `SELECT`-only
+  privileges on the two audit tables.
+
+## Continue
+
+- [Claude Skill](/docs/ai-integration/claude-skill) — install the
+  skill, see example prompts.
+- [MCP Server](/docs/ai-integration/mcp-server) — install the binary,
+  wire it into your editor, full tool reference.

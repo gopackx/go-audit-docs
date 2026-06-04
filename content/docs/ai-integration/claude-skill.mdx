@@ -1,0 +1,93 @@
+---
+title: Claude Skill
+description: A self-contained skill that teaches Claude Code how to integrate go-audit correctly from a cold prompt.
+---
+
+The `go-audit` skill is a single Markdown file (`SKILL.md`) that
+Claude Code loads on demand. With it installed, Claude knows the
+correct setup sequence, common pitfalls, and which version-specific
+bug to watch out for — no copy-pasting docs into your prompt.
+
+It's written for **new users**: people who heard of go-audit and want
+Claude to do the integration for them.
+
+## What the skill knows
+
+Once loaded, Claude can:
+
+- Decide whether go-audit is the right fit (or recommend `log/slog` /
+  HTTP middleware instead).
+- Pick the right dialect constant (`audit.PostgreSQL` /
+  `audit.MySQL` / `audit.SQLite`).
+- Build a valid `audit.Config{...}` with `UserFunc`, exclusion lists,
+  redaction lists, and `MaxBodySize`.
+- Run `AutoMigrate(ctx)` at the right place in startup.
+- Register the matching ORM adapter (GORM / Bun / Ent).
+- Add transaction correlation via `audit.WithTransactionID(ctx, ...)`.
+- Recognise and avoid the seven most common first-integration
+  pitfalls (e.g. the pre-v1.1.0 GORM `WHERE WHERE` bug, recursive
+  auditing of the audit table, struct redaction quirks).
+
+## Install
+
+The skill lives in the repo at
+[`skills/go-audit/SKILL.md`](https://github.com/gopackx/go-audit/blob/master/skills/go-audit/SKILL.md).
+
+### Project-scoped (recommended for teams)
+
+```bash
+mkdir -p .claude/skills/go-audit
+curl -fsSL https://raw.githubusercontent.com/gopackx/go-audit/master/skills/go-audit/SKILL.md \
+  -o .claude/skills/go-audit/SKILL.md
+git add .claude/skills/go-audit/SKILL.md
+```
+
+Now anyone on the team using Claude Code in this repo gets the skill
+automatically.
+
+### User-scoped (just for you)
+
+```bash
+mkdir -p ~/.claude/skills/go-audit
+curl -fsSL https://raw.githubusercontent.com/gopackx/go-audit/master/skills/go-audit/SKILL.md \
+  -o ~/.claude/skills/go-audit/SKILL.md
+```
+
+Restart Claude Code (or run `/skills` to verify it loaded).
+
+## Example prompts that trigger it
+
+The skill's `description` is tuned so Claude only activates it for
+genuine Go audit-trail tasks — not generic logging requests.
+
+Prompts that will load the skill:
+
+- *"Add an audit trail to this Go service. We use GORM and Postgres."*
+- *"How do I track who deletes products in this codebase?"*
+- *"I need compliance logging for the payment endpoints — set it up."*
+- *"Upgrade this project from go-audit v1.0 to v1.1."*
+
+Prompts that will **not** load it (correctly):
+
+- *"Add logging to this function"* — Claude will use `log/slog`.
+- *"Log incoming HTTP requests"* — Claude will use middleware.
+- *"Add Laravel audit"* — wrong language / framework.
+
+## Versioning
+
+The skill is versioned alongside the library — the copy in `master`
+always reflects the latest released version. When you bump go-audit,
+re-download `SKILL.md`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gopackx/go-audit/master/skills/go-audit/SKILL.md \
+  -o .claude/skills/go-audit/SKILL.md
+```
+
+The skill covers all v1.x guidance and updates with each release.
+
+## Continue
+
+Want Claude to do more than integrate — actually *query* your audit
+data conversationally during incidents or investigations? Continue to
+the [MCP server](/docs/ai-integration/mcp-server).
