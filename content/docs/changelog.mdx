@@ -3,6 +3,32 @@ title: Changelog
 description: Release notes for Go Audit.
 ---
 
+## adapters/gorm v1.1.1
+
+Patch release for the GORM adapter only — core `v1.1.0` is unchanged.
+
+### Bug fixes (correctness)
+
+- **adapters/gorm**: nested `Create` no longer double-audits child rows
+  on GORM ≥ v1.31 (the "2 items → 4 rows" report). The `v1.1.0` dedup
+  was scoped to a single GORM statement, but on GORM ≥ v1.31 one
+  `db.Create(&parent)` runs the child create-callback chain twice within
+  its auto-transaction — an initial INSERT and an FK-backfill upsert, in
+  two separate statements — so the per-statement set never caught the
+  repeat. Dedup is now scoped to the **transaction**, shared across every
+  statement of one logical write, with a depth counter so it is freed
+  when the outermost operation completes (no leak) and two *explicit*
+  sequential writes of the same row are each still audited.
+
+### Upgrade
+
+```bash
+go get github.com/gopackx/go-audit/adapters/gorm@v1.1.1
+```
+
+If you installed `adapters/gorm@v1.1.0`, upgrade to pick up this fix.
+No schema change and no core upgrade required.
+
 ## v1.1.0
 
 ### Bug fixes (correctness)
