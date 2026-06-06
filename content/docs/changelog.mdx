@@ -3,6 +3,37 @@ title: Changelog
 description: Release notes for Go Audit.
 ---
 
+## adapters/gorm v1.1.2
+
+Patch release for the GORM adapter only — core `v1.1.0` is unchanged.
+
+### Bug fixes (correctness)
+
+- **adapters/gorm** (issue #1, "A2b"): a parent `Update` that still
+  carries its loaded HasMany associations no longer double-audits the
+  children as `create`. Calling `db.Model(&order).Update(...)` while
+  `order.Items` is still attached makes GORM re-upsert the children
+  (`ON CONFLICT DO UPDATE`), which runs the create-callback chain a second
+  time — so each child was recorded as `create` again
+  (`order_items/create == 4` instead of `2`). Because this happens in the
+  Update's transaction (separate from the original Create), the v1.1.1
+  transaction-scoped dedup could not see it.
+
+  The adapter now distinguishes a genuine insert from an association
+  re-save: a re-saved child already has a non-zero primary key **before**
+  the statement runs, and the operation's root is an update/delete rather
+  than a create. Such rows are skipped for `create` auditing. Genuinely
+  new children added during an update (PK still zero) and all top-level /
+  nested creates remain fully audited.
+
+  Workaround on `v1.1.1` and earlier: `db.Model(&order).Omit("Items").Update(...)`.
+
+### Upgrade
+
+```bash
+go get github.com/gopackx/go-audit/adapters/gorm@v1.1.2
+```
+
 ## adapters/gorm v1.1.1
 
 Patch release for the GORM adapter only — core `v1.1.0` is unchanged.
