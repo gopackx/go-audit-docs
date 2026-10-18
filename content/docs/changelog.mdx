@@ -3,6 +3,29 @@ title: Changelog
 description: Release notes for Go Audit.
 ---
 
+## mcp v1.1.2
+
+Patch release for the MCP server (`mcp/`). Depends on core `v1.1.1`.
+
+### Bug fixes
+
+- **mcp**: `date_from` / `date_to` on `query_data_logs` and
+  `query_api_logs`, and `at` on `snapshot_entity`, are now compared as
+  instants on SQLite. The server parses these RFC3339 parameters and
+  passes them to the core date filters, which on `mcp/v1.1.1` and earlier
+  bound them as zone-tagged strings; a value carrying a non-UTC offset
+  could therefore match the wrong rows. Picking up core `v1.1.1` fixes
+  this (see below). PostgreSQL and MySQL were unaffected.
+
+No tool changes: names, parameters and response shapes are identical to
+`mcp/v1.1.1`.
+
+### Upgrade
+
+```bash
+go install github.com/gopackx/go-audit/mcp@v1.1.2
+```
+
 ## v1.1.1
 
 Core patch release. Adapter users should also pick up the matching
