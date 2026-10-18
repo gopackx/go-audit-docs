@@ -3,6 +3,54 @@ title: Changelog
 description: Release notes for Go Audit.
 ---
 
+## adapters/gorm v1.1.3
+
+Patch release for the GORM adapter only — core `v1.1.0` is unchanged.
+
+### Bug fixes (correctness / performance)
+
+- **adapters/gorm**: the pre-write snapshot for primary-key-driven
+  writes (`db.Model(&p).Update(...)`, `db.Save(&p)`, `db.Delete(&p)`,
+  `db.Delete(&rows)`) no longer scans the whole table. GORM adds the
+  primary-key predicate only inside its own `gorm:update` /
+  `gorm:delete` callbacks, after the snapshot has run, so the snapshot
+  executed `SELECT * FROM <table>` with no `WHERE` (a 1-row update on a
+  large table loaded every row). The adapter now builds the same
+  primary-key predicate itself and ANDs it with any user `WHERE`, so
+  the snapshot loads only the targeted rows.
+- **adapters/gorm**: WHERE-driven bulk updates and deletes
+  (`db.Model(&T{}).Where(...).Update(...)`,
+  `db.Where(...).Delete(&T{})`) no longer produce a single bogus entry
+  with `entity_id "0"` and empty `old_values`. They now emit one entry
+  per row found by the snapshot, with that row's real `entity_id`,
+  `old_values` from the snapshot, and `new_values` = the snapshot with
+  the assigned columns applied (`null` for a hard delete,
+  `{"deleted_at": ...}` for a soft delete).
+- **adapters/gorm**: `db.Unscoped().Delete(&row)` on a row that was
+  already soft-deleted is now recorded as `delete` (with its old values)
+  rather than `soft_delete`. The snapshot also respects `Unscoped`, so
+  it finds the soft-deleted row.
+
+### Behaviour changes
+
+- With `DataAudit.SkipOldValues: true`, WHERE-driven bulk updates and
+  deletes are **no longer audited at all** — without a snapshot there is
+  no way to attribute them to rows. Previously they produced one
+  misleading `entity_id "0"` entry. Primary-key-driven writes are still
+  audited per row.
+- Writes run with `AllowGlobalUpdate` (no `WHERE`, no primary key)
+  snapshot the whole table by design, since the write itself touches
+  every row; each row gets its own entry.
+
+### Upgrade
+
+```bash
+go get github.com/gopackx/go-audit/adapters/gorm@v1.1.3
+```
+
+> The `adapters/gorm/v1.1.3` tag is pending; until it is pushed, this
+> command will not resolve.
+
 ## adapters/gorm v1.1.2
 
 Patch release for the GORM adapter only — core `v1.1.0` is unchanged.

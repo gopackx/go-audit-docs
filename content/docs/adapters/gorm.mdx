@@ -63,12 +63,14 @@ if err := auditor.AutoMigrate(context.Background()); err != nil {
 The plugin registers five callbacks:
 
 - `after_create` — records `ActionCreate` with `new_values`.
-- `before_update` — snapshots the current row via `SELECT` (unless
-  `DataAudit.SkipOldValues` is set).
+- `before_update` — snapshots the affected rows via a `SELECT` that
+  targets the same rows as the write: its WHERE clause **and** the
+  model's primary key (unless `DataAudit.SkipOldValues` is set).
 - `after_update` — diffs the snapshot against the new values,
   records `ActionUpdate` with only the changed fields.
-- `before_delete` — snapshots the row; detects soft deletes via
-  presence of a `deleted_at` field.
+- `before_delete` — snapshots the affected rows the same way as
+  `before_update`; detects soft deletes via presence of a `deleted_at`
+  field.
 - `after_delete` — records `ActionDelete` (hard delete) or
   `ActionSoftDelete` (soft delete via `gorm.DeletedAt`).
 
@@ -83,6 +85,40 @@ Errors from audit writes are attached to the `*gorm.DB` via
 - `db.UpdateColumn()` / `db.UpdateColumns()`
 - `db.Delete()` — hard and soft deletes
 - Bulk operations — all affected rows share one `transaction_id`
+
+## Bulk Updates and Deletes
+
+Bulk updates and deletes produce one audit log per affected row, all
+sharing the same `transaction_id`:
+
+```go
+db.Model(&Product{}).Where("price < ?", 100).Updates(Product{Status: "archived"})
+// -> N audit logs, one per row, same transaction_id
+
+db.Where("price < ?", 100).Delete(&Product{})
+// -> N audit logs (action "delete" or "soft_delete"), one per row
+```
+
+A WHERE-driven bulk write carries no primary key on its model, so the
+affected rows are identified by the pre-write snapshot: the `SELECT`
+runs with the same WHERE, and each row it returns becomes one entry
+with:
+
+- `entity_id` — that row's primary key
+- `old_values` — the snapshot
+- `new_values` — the snapshot with the assigned columns applied
+  (`null` for a hard delete, `{"deleted_at": ...}` for a soft delete)
+
+With `DataAudit.SkipOldValues: true` no snapshot is taken, so such bulk
+writes **cannot be attributed per row and are not audited**. Writes
+that target rows by primary key (`db.Model(&p).Update(...)`,
+`db.Save(&p)`, `db.Delete(&p)`, `db.Delete(&rows)`) are still audited
+per row without a snapshot.
+
+A write with neither a WHERE clause nor a primary key is rejected by
+GORM (`ErrMissingWhereClause`) and no snapshot is taken. With
+`AllowGlobalUpdate` the write touches the whole table, so the snapshot
+does too.
 
 ## Configuration
 
@@ -109,7 +145,8 @@ If your model includes a `gorm.DeletedAt` field, GORM performs an
 UPDATE rather than a DELETE. The adapter detects this and records
 the action as `"soft_delete"` with the new `deleted_at` value in
 `new_values`. Hard deletes (e.g. `.Unscoped().Delete()`) are recorded
-as `"delete"` with `new_values: null`.
+as `"delete"` with `new_values: null` — including an `Unscoped()`
+delete of a row that was already soft-deleted.
 
 ## Caveats
 
