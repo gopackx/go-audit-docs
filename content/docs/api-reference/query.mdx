@@ -83,6 +83,13 @@ type PurgeResult struct {
 
 Run `Purge` from a daily cron to enforce retention policies.
 
+**Time zones.** `created_at` is stored in UTC. `before` (and `DateFrom` /
+`DateTo` on the filters, and `at` on `Snapshot` / `Restore`) may be in
+any zone; since `v1.1.1` the SQL store normalises every time parameter
+to UTC before binding it. This matters on SQLite, where times are stored
+as text and compared as strings: on `v1.1.0` and earlier a local-zone
+cutoff could purge rows newer than intended.
+
 ## `Auditor.Snapshot(ctx, entityType, entityID, at) → (map[string]any, error)`
 
 Reconstructs the state of an entity at a given point in time by

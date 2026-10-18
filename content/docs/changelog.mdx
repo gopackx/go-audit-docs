@@ -3,11 +3,74 @@ title: Changelog
 description: Release notes for Go Audit.
 ---
 
-## Unreleased
+## v1.1.1
 
-Changes on `master` that are not yet tagged. Core `v1.1.0` is
-unchanged; the adapter changes below will ship as new
-`adapters/bun` and `adapters/ent` tags.
+Core patch release. Adapter users should also pick up the matching
+`adapters/bun/v1.1.1` and `adapters/ent/v1.1.1` below; `adapters/gorm`
+is unchanged at `v1.1.3`.
+
+### Bug fixes (correctness — data loss on SQLite)
+
+- **core / store**: `Purge`, `DataFilter.DateFrom/DateTo`,
+  `APIFilter.DateFrom/DateTo` and therefore `Snapshot`'s `at` now compare
+  instants on SQLite. `created_at` is written in UTC, but SQLite has no
+  time type: the driver binds a `time.Time` as text including its zone
+  offset and SQLite compares the strings lexicographically. A cutoff
+  built in a local zone (`... 20:00:00+07:00`) sorted after every UTC row
+  written in the same hour (`... 14:00:00+00:00`), so
+  `Purge(time.Now().Add(-1*time.Hour))` on a UTC+7 machine deleted every
+  fresh row, and date filters missed or included rows by the zone
+  offset. The SQL store now normalises every time parameter to UTC before
+  binding. PostgreSQL (`TIMESTAMPTZ`) and MySQL (`TIMESTAMP`) already
+  compared instants, so nothing changes there.
+
+  **Contract:** `created_at` is stored in UTC; callers may pass a
+  `time.Time` in any zone to `Purge`, `Snapshot`, `Restore` and the
+  date filters. See [Querying → Retention](/docs/api-reference/query#auditorpurgectx-before--purgeresult-error).
+
+### Upgrade
+
+```bash
+go get github.com/gopackx/go-audit@v1.1.1
+```
+
+No schema change. SQLite deployments in non-UTC zones should audit
+their retention jobs: rows newer than the intended cutoff may already
+have been purged on `v1.1.0` and earlier.
+
+## adapters/bun v1.1.1
+
+Patch release for the Bun adapter. Requires core `v1.1.0` or later.
+
+### Behaviour changes
+
+- **adapters/bun**: `ErrorFailLoud` (the default) is now honoured as
+  far as Bun allows. `bun.QueryHook.AfterQuery` runs after the
+  statement and cannot change the error Bun returns, so the query
+  cannot be aborted; previously the error was silently discarded. The
+  hook now passes it to an error handler whose default logs via
+  `Config.Logger` (`log.Printf` when nil). See
+  [Bun → Error Handling](/docs/adapters/bun#error-handling).
+- Under `ErrorFailSilent` nothing changed: the auditor logs via
+  `Config.Logger` and swallows the error.
+
+### New
+
+- `auditbun.Register(db, auditor, opts ...Option)` accepts functional
+  options. `auditbun.WithErrorHandler(func(ctx context.Context, err
+  error))` replaces the default handler so you can raise a metric, trip
+  a health check, or mark the surrounding transaction for rollback. The
+  error is `go-audit: bun: record <action> <table>/<id>: <store error>`.
+
+### Upgrade
+
+```bash
+go get github.com/gopackx/go-audit/adapters/bun@v1.1.1
+```
+
+## adapters/ent v1.1.1
+
+Patch release for the Ent adapter. Requires core `v1.1.0` or later.
 
 ### Behaviour changes
 
@@ -21,24 +84,13 @@ unchanged; the adapter changes below will ship as new
   your code relied on Ent mutations never failing because of the
   audit store, wrap them in a transaction or switch that table to
   `ErrorFailSilent`. See [Ent → Error Handling](/docs/adapters/ent#error-handling).
-- **adapters/bun**: `ErrorFailLoud` (the default) is now honoured as
-  far as Bun allows. `bun.QueryHook.AfterQuery` runs after the
-  statement and cannot change the error Bun returns, so the query
-  cannot be aborted; previously the error was silently discarded. The
-  hook now passes it to an error handler whose default logs via
-  `Config.Logger` (`log.Printf` when nil). See
-  [Bun → Error Handling](/docs/adapters/bun#error-handling).
-- Under `ErrorFailSilent` nothing changed: the auditor logs via
-  `Config.Logger` and swallows the error in every adapter.
+- Under `ErrorFailSilent` nothing changed.
 
-### New
+### Upgrade
 
-- **adapters/bun**: `auditbun.Register(db, auditor, opts ...Option)`
-  accepts functional options. `auditbun.WithErrorHandler(func(ctx
-  context.Context, err error))` replaces the default handler so you
-  can raise a metric, trip a health check, or mark the surrounding
-  transaction for rollback. The error is
-  `go-audit: bun: record <action> <table>/<id>: <store error>`.
+```bash
+go get github.com/gopackx/go-audit/adapters/ent@v1.1.1
+```
 
 ### Examples
 
