@@ -69,6 +69,24 @@ For bulk `Update` / `Delete` operations, Ent exposes the affected IDs
 via `mutation.IDs(ctx)` but **not** the pre-mutation field values.
 The adapter emits one audit row per affected ID without `old_values`.
 
+## Error Handling
+
+Because the hook wraps the mutation, `ErrorFailLoud` works like GORM's
+`AddError`: a failed audit write is returned from `Mutate` as
+`go-audit: record <action>: <store error>` (unwrap with `errors.Is` /
+`errors.As`) **together with the mutation result**. The mutation itself
+has already been applied when the audit store fails, so fail-loud
+reports the failure; it does not roll the write back on its own.
+Returning that error from a transaction closure rolls the write back.
+
+For bulk mutations (`CreateBulk`, bulk `Update` / `Delete`) every
+affected row is still offered to the store; the failures are joined
+into one error (`errors.Join`) and returned once all rows have been
+attempted.
+
+Under `ErrorFailSilent` the auditor logs the failure via
+`Config.Logger` and `Mutate` returns `nil` as usual.
+
 ## Caveats
 
 - **Bulk old values are unavailable.** This is an Ent design

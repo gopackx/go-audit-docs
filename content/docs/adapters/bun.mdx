@@ -79,6 +79,32 @@ The adapter tries two strategies in order:
 
 Batch operations are grouped under one `transaction_id`.
 
+## Error Handling
+
+`bun.QueryHook.AfterQuery` runs after the statement has executed and
+cannot change the error Bun returns to the caller, so under
+`ErrorFailLoud` a failed audit write **cannot abort the Bun query**.
+The query succeeds and the hook hands the audit-store error to an
+error handler instead. The default handler logs it through
+`Config.Logger` (`log.Printf` when nil); replace it with
+`auditbun.WithErrorHandler` to raise a metric, trip a health check, or
+mark the surrounding transaction for rollback:
+
+```go
+auditbun.Register(bunDB, auditor, auditbun.WithErrorHandler(func(ctx context.Context, err error) {
+    metrics.Inc("audit_failures")
+}))
+```
+
+The error passed to the handler is
+`go-audit: bun: record <action> <table>/<id>: <store error>` and can be
+unwrapped with `errors.Is` / `errors.As`.
+
+Under `ErrorFailSilent` the auditor logs and swallows the error itself,
+so the handler is never called. In both modes the Bun write has already
+happened by the time the audit store fails — fail-loud reports, it does
+not roll back on its own.
+
 ## Caveats
 
 - **Transactions.** The snapshot SELECT runs against the base
@@ -91,3 +117,6 @@ Batch operations are grouped under one `transaction_id`.
   snapshotted row logging old values only — post-state is not
   available after a bulk write.
 - Raw SQL via `db.ExecContext` bypasses the hook and is not audited.
+- **`ErrorFailLoud` cannot fail the query.** Audit-store errors reach
+  the `WithErrorHandler` callback, not the caller of the Bun query. See
+  [Error Handling](#error-handling).

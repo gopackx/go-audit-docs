@@ -56,7 +56,7 @@ type Config struct {
 | `UserFunc`  | Resolves `(userID, userType)` from context on every audit write.        |
 | `DataAudit` | Data change auditing config.                                            |
 | `APIAudit`  | API call auditing config.                                               |
-| `Logger`    | Called when a storage error is swallowed under `ErrorFailSilent`. Optional — defaults to `log.Printf`. |
+| `Logger`    | Called when a storage error is swallowed under `ErrorFailSilent`, and by the Bun adapter's default error handler under `ErrorFailLoud`. Optional — defaults to `log.Printf`. |
 
 ## `audit.DataAuditConfig`
 
@@ -106,14 +106,33 @@ type APIAuditConfig struct {
 
 ```go
 const (
-    ErrorFailLoud   ErrorMode = iota // surfaces store errors to the caller (default)
+    ErrorFailLoud   ErrorMode = iota // auditor returns store errors; each adapter surfaces them as far as its ORM allows (default)
     ErrorFailSilent                  // logs via Config.Logger and returns nil
 )
 ```
 
-Use `ErrorFailSilent` when the application write must not be coupled
-to audit availability (e.g. the audit DB is allowed to be briefly
-unavailable during maintenance).
+Under `ErrorFailLoud` the auditor returns the store error from
+`RecordDataChange` / `RecordAPICall`. How far it travels depends on the
+adapter:
+
+| Adapter | What the caller sees |
+| ------- | -------------------- |
+| GORM | Attached to the `*gorm.DB` via `db.AddError`, visible in `db.Error`. |
+| Ent | Returned from `Mutate` as `go-audit: record <action>: <store error>` together with the mutation result; bulk mutations join the per-row failures. |
+| Bun | `AfterQuery` cannot change the error Bun returns, so the error goes to the `auditbun.WithErrorHandler` callback. The default handler logs via `Config.Logger`. |
+| Direct `RecordDataChange` / `RecordAPICall` | Returned as-is. |
+
+In every adapter the ORM write has already been applied when the audit
+store fails — fail-loud reports, it does not roll back on its own. See
+the per-adapter pages for details:
+[GORM](/docs/adapters/gorm#how-it-works),
+[Bun](/docs/adapters/bun#error-handling),
+[Ent](/docs/adapters/ent#error-handling).
+
+Under `ErrorFailSilent` the auditor logs via `Config.Logger` and
+returns `nil` in every adapter. Use it when the application write must
+not be coupled to audit availability (e.g. the audit DB is allowed to
+be briefly unavailable during maintenance).
 
 ## `audit.UserFunc`
 

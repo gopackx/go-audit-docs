@@ -3,6 +3,50 @@ title: Changelog
 description: Release notes for Go Audit.
 ---
 
+## Unreleased
+
+Changes on `master` that are not yet tagged. Core `v1.1.0` is
+unchanged; the adapter changes below will ship as new
+`adapters/bun` and `adapters/ent` tags.
+
+### Behaviour changes
+
+- **adapters/ent**: `ErrorFailLoud` (the default) is now honoured.
+  Previously the hook discarded audit-store errors, so a failed audit
+  write under fail-loud went unnoticed. `Mutate` now returns
+  `go-audit: record <action>: <store error>` (unwrap with `errors.Is`
+  / `errors.As`) together with the already-applied mutation result,
+  mirroring the GORM adapter's `AddError`. Bulk mutations still offer
+  every row to the store and join the failures into one error. If
+  your code relied on Ent mutations never failing because of the
+  audit store, wrap them in a transaction or switch that table to
+  `ErrorFailSilent`. See [Ent → Error Handling](/docs/adapters/ent#error-handling).
+- **adapters/bun**: `ErrorFailLoud` (the default) is now honoured as
+  far as Bun allows. `bun.QueryHook.AfterQuery` runs after the
+  statement and cannot change the error Bun returns, so the query
+  cannot be aborted; previously the error was silently discarded. The
+  hook now passes it to an error handler whose default logs via
+  `Config.Logger` (`log.Printf` when nil). See
+  [Bun → Error Handling](/docs/adapters/bun#error-handling).
+- Under `ErrorFailSilent` nothing changed: the auditor logs via
+  `Config.Logger` and swallows the error in every adapter.
+
+### New
+
+- **adapters/bun**: `auditbun.Register(db, auditor, opts ...Option)`
+  accepts functional options. `auditbun.WithErrorHandler(func(ctx
+  context.Context, err error))` replaces the default handler so you
+  can raise a metric, trip a health check, or mark the surrounding
+  transaction for rollback. The error is
+  `go-audit: bun: record <action> <table>/<id>: <store error>`.
+
+### Examples
+
+- `_examples/gorm-basic` and `_examples/full-example`: `gorm.io/gorm`
+  `v1.25.12` → `v1.31.1`, `golang.org/x/text` `v0.14.0` → `v0.20.0`.
+  All examples require `go-audit v1.1.0` (still replaced by the local
+  checkout) instead of `v0.0.0`. No library change.
+
 ## adapters/gorm v1.1.3
 
 Patch release for the GORM adapter only — core `v1.1.0` is unchanged.

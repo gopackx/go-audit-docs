@@ -41,7 +41,7 @@ Choose between strict and relaxed modes per audit table:
 ```go
 DataAudit: audit.DataAuditConfig{
     Enabled: true,
-    OnError: audit.ErrorFailLoud, // default — errors bubble up
+    OnError: audit.ErrorFailLoud, // default — store errors are reported (per adapter, see below)
 },
 APIAudit: audit.APIAuditConfig{
     Enabled: true,
@@ -54,8 +54,26 @@ un-audited write is unacceptable. Use `ErrorFailSilent` when the main
 write must not be coupled to audit availability (e.g. degraded mode
 during a planned audit-DB maintenance window).
 
-When using `ErrorFailSilent`, set `Config.Logger` so failures are
-visible to observability.
+How far a fail-loud error travels depends on the adapter. In every
+adapter the ORM write has already been applied when the audit store
+fails, so fail-loud reports the failure; to make it block the
+operation, run the write in a transaction and return the error from
+the closure.
+
+- **GORM** — attached to the `*gorm.DB` via `AddError`; check
+  `db.Error` or return it from a `db.Transaction` closure.
+- **Ent** — returned from the mutation as
+  `go-audit: record <action>: <store error>` alongside the result.
+- **Bun** — `AfterQuery` cannot change the error Bun returns, so the
+  query still succeeds and the error goes to the
+  `auditbun.WithErrorHandler` callback (default: logged via
+  `Config.Logger`). Use the handler to raise a metric or mark the
+  transaction for rollback. See
+  [Bun → Error Handling](/docs/adapters/bun#error-handling).
+
+Set `Config.Logger` so failures are visible to observability: it
+receives everything swallowed under `ErrorFailSilent` and, for Bun,
+the fail-loud errors reported by the default handler.
 
 ## Skip Old Values on Hot Paths
 
