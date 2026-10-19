@@ -23,12 +23,12 @@ export const metadata: Metadata = {
   },
   description:
     'Automatic audit trail and API call logging for Go applications. One line setup. Zero manual code. Full traceability.',
-  metadataBase: new URL('https://go-audit.andrianprasetya.com'),
+  metadataBase: new URL('https://go-audit.gopackx.me'),
   openGraph: {
     title: 'Go Audit',
     description:
       'Automatic audit trail and API call logging for Go applications.',
-    url: 'https://go-audit.andrianprasetya.com',
+    url: 'https://go-audit.gopackx.me',
     siteName: 'Go Audit',
     type: 'website',
   },

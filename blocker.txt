@@ -19,7 +19,7 @@ Remaining items that need you (Andrian), not code:
 4. Connect to Vercel
    - Import repo on Vercel (framework auto-detected as Next.js).
    - vercel.json pins Bun as installer; no env vars required.
-   - Add custom domain: go-audit.andrianprasetya.com
+   - Add custom domain: go-audit.gopackx.me
    - DNS: CNAME record `go-audit` -> `cname.vercel-dns.com`
 
 Stack locked in:

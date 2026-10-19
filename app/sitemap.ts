@@ -1,7 +1,7 @@
 import type { MetadataRoute } from 'next';
 import { source } from '@/lib/source';
 
-const BASE_URL = 'https://go-audit.andrianprasetya.com';
+const BASE_URL = 'https://go-audit.gopackx.me';
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const pages = source.getPages().map((page) => ({

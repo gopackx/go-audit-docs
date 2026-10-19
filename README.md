@@ -4,7 +4,7 @@ Documentation site for [Go Audit](https://github.com/gopackx/go-audit),
 built with [Next.js 16](https://nextjs.org) + [Fumadocs 16](https://fumadocs.vercel.app)
 and styled with Tailwind CSS v4.
 
-Production URL: `https://go-audit.andrianprasetya.com`
+Production URL: `https://go-audit.gopackx.me`
 
 ## Stack
 
@@ -57,7 +57,7 @@ One-time:
 1. Push this repo to GitHub.
 2. Import the repo on Vercel (Framework preset: **Next.js**; the
    `vercel.json` in this repo pins install/build commands for Bun).
-3. Add the custom domain `go-audit.andrianprasetya.com` under
+3. Add the custom domain `go-audit.gopackx.me` under
    Project → Settings → Domains.
 4. Point DNS: add a `CNAME` record for `go-audit` → `cname.vercel-dns.com`.
 
